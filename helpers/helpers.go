@@ -20,7 +20,7 @@ func InitializeRedisClient(options *redis.Options) *redis.Client {
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		fmt.Printf("Failed to connect to Redis at %s: %v\n", addr, err)
+		fmt.Printf("Failed to connect to Redis at %s: %v\n", options.Addr, err)
 		os.Exit(1)
 	}
 
