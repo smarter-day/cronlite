@@ -87,8 +87,8 @@ func main() {
 				}
 
 				// Generate random integer between 1 and 50
-				randomInt := rand.Intn(25) + 30
-				newSpec := fmt.Sprintf("*/%d * * * * * *", randomInt)
+				randomInt := rand.Intn(3) + 1
+				newSpec := fmt.Sprintf("* */%d * * * * *", randomInt)
 
 				// Update the cron job's Spec
 				state.Data["spec"] = newSpec
