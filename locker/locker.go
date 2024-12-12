@@ -1,7 +1,8 @@
-package cronlite
+package locker
 
 import (
 	"context"
+	"cronlite/logger"
 	"errors"
 	"fmt"
 	"sync"
@@ -28,7 +29,7 @@ type ILocker interface {
 type LockerOptions struct {
 	Name    string
 	Redis   redis.Cmdable
-	Logger  ILogger
+	Logger  logger.ILogger
 	LockTTL time.Duration
 }
 
@@ -41,7 +42,7 @@ type Locker struct {
 // NewLocker initializes a new locker
 func NewLocker(options LockerOptions) ILocker {
 	if options.Logger == nil {
-		options.Logger = &LogLogger{}
+		options.Logger = &logger.LogLogger{}
 	}
 	if options.LockTTL == 0 {
 		options.LockTTL = DefaultLockTTL

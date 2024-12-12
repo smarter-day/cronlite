@@ -2,21 +2,18 @@ package main
 
 import (
 	"context"
+	"cronlite/cron"
 	"cronlite/examples"
+	"cronlite/logger"
+	"errors"
 	"fmt"
+	"github.com/spf13/cobra"
 	"os"
 	"time"
-
-	// Import the cronlite packages
-	"cronlite/cron"
-	"cronlite/logger"
-
-	// Import Cobra packages
-	"github.com/spf13/cobra"
 )
 
 func main() {
-	// Create a root context that will be canceled on program termination
+	// Create a root context that will be canceled on program termination or timeout
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -88,7 +85,7 @@ func main() {
 				return
 			}
 
-			// Start the cron job in a separate goroutine
+			// Start the cron job
 			if err := cronJob.Start(ctx); err != nil {
 				appLogger.Error(ctx, "Failed to start cron job.", map[string]interface{}{"error": err})
 				return
@@ -96,8 +93,20 @@ func main() {
 
 			appLogger.Info(ctx, "Cron job started successfully.", nil)
 
-			// Wait for the context to be canceled (e.g., via an OS signal)
-			<-ctx.Done()
+			// Create a context with a timeout of 1 minute
+			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 1*time.Minute)
+			defer timeoutCancel()
+
+			// Wait for either the parent context to be canceled or the timeout to occur
+			select {
+			case <-timeoutCtx.Done():
+				if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
+					appLogger.Info(ctx, "Timeout reached. Initiating shutdown...", nil)
+					cancel() // Cancel the parent context to initiate shutdown
+				}
+			case <-ctx.Done():
+				// Context was canceled externally (e.g., via OS signal)
+			}
 
 			// Stop the cron job gracefully
 			if err := cronJob.Stop(ctx); err != nil {

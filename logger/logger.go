@@ -1,4 +1,4 @@
-package cronlite
+package logger
 
 import (
 	"context"
@@ -12,9 +12,10 @@ import (
 
 // ILogger defines a basic logger interface for flexibility
 type ILogger interface {
-	Debug(ctx context.Context, message string, fields map[string]interface{})
-	Error(ctx context.Context, message string, fields map[string]interface{})
 	Info(ctx context.Context, message string, fields map[string]interface{})
+	Warning(ctx context.Context, message string, fields map[string]interface{})
+	Error(ctx context.Context, message string, fields map[string]interface{})
+	Debug(ctx context.Context, message string, fields map[string]interface{})
 	SetLogLevel(level string) error
 }
 
@@ -60,6 +61,12 @@ func (l *LogLogger) Info(ctx context.Context, message string, fields map[string]
 	}
 }
 
+func (l *LogLogger) Warning(ctx context.Context, message string, fields map[string]interface{}) {
+	if l.level == "warning" || l.level == "info" || l.level == "debug" {
+		l.log("warning", message, fields)
+	}
+}
+
 func (l *LogLogger) SetLogLevel(level string) error {
 	level = strings.ToLower(level)
 	switch level {
@@ -85,9 +92,7 @@ func NewLogrusLogger(logger *logrus.Logger) *LogrusLogger {
 }
 
 func (l *LogrusLogger) Debug(ctx context.Context, message string, fields map[string]interface{}) {
-	if l.Logger.GetLevel() <= logrus.DebugLevel {
-		l.Logger.WithFields(logrus.Fields(fields)).Debug(message)
-	}
+	l.Logger.WithFields(logrus.Fields(fields)).Debug(message)
 }
 
 func (l *LogrusLogger) Error(ctx context.Context, message string, fields map[string]interface{}) {
@@ -95,9 +100,11 @@ func (l *LogrusLogger) Error(ctx context.Context, message string, fields map[str
 }
 
 func (l *LogrusLogger) Info(ctx context.Context, message string, fields map[string]interface{}) {
-	if l.Logger.GetLevel() <= logrus.InfoLevel {
-		l.Logger.WithFields(logrus.Fields(fields)).Info(message)
-	}
+	l.Logger.WithFields(logrus.Fields(fields)).Info(message)
+}
+
+func (l *LogrusLogger) Warning(ctx context.Context, message string, fields map[string]interface{}) {
+	l.Logger.WithFields(logrus.Fields(fields)).Warning(message)
 }
 
 func (l *LogrusLogger) SetLogLevel(level string) error {
@@ -108,6 +115,8 @@ func (l *LogrusLogger) SetLogLevel(level string) error {
 		l.Logger.SetLevel(logrus.InfoLevel)
 	case "error":
 		l.Logger.SetLevel(logrus.ErrorLevel)
+	case "warning":
+		l.Logger.SetLevel(logrus.WarnLevel)
 	default:
 		return fmt.Errorf("invalid log level: %s", level)
 	}

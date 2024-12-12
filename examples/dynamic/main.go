@@ -2,21 +2,19 @@ package main
 
 import (
 	"context"
+	"cronlite/cron"
 	"cronlite/examples"
+	"cronlite/logger"
+	"errors"
 	"fmt"
+	"github.com/spf13/cobra"
+	"math/rand"
 	"os"
 	"time"
-
-	// Import the cronlite packages
-	"cronlite/cron"
-	"cronlite/logger"
-
-	// Import Cobra packages
-	"github.com/spf13/cobra"
 )
 
 func main() {
-	// Create a root context that will be canceled on program termination
+	// Create a root context that will be canceled on program termination or timeout
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -72,13 +70,47 @@ func main() {
 				return nil // Return nil to indicate success
 			}
 
+			// Define the BeforeExecute hook
+			beforeExecute := func(ctx context.Context, job *cron.Job) (bool, error) {
+				state, err := job.GetState(ctx)
+				if err != nil {
+					appLogger.Error(ctx, "Failed to retrieve job state.", map[string]interface{}{"error": err})
+					return false, err
+				}
+
+				if state.Iterations == 0 {
+					// First execution, proceed as normal
+					return true, nil
+				}
+
+				// Generate random integer between 1 and 50
+				randomInt := rand.Intn(50) + 1
+				newSpec := fmt.Sprintf("*/%d * * * * * *", randomInt)
+
+				// Update the cron job's Spec
+				state.Data["spec"] = newSpec
+				err = job.SaveState(ctx, state)
+				if err != nil {
+					return false, err
+				} // Save the updated state
+				if err != nil {
+					appLogger.Error(ctx, "Failed to update cron spec.", map[string]interface{}{"error": err})
+					return false, err
+				}
+
+				appLogger.Info(ctx, "Changed cron spec by random integer seconds.", map[string]interface{}{"randomInt": randomInt})
+
+				return true, nil
+			}
+
 			// Define the cron job options
 			jobOptions := cron.JobOptions{
-				Redis:  redisClient,       // Redis client for state management and locking
-				Name:   jobName,           // Unique name for the cron job
-				Spec:   "*/5 * * * * * *", // Cron schedule: every 5 seconds
-				Job:    jobFunction,       // The job function to execute
-				Logger: appLogger,         // Logger for logging job activities
+				Redis:         redisClient,       // Redis client for state management and locking
+				Name:          jobName,           // Unique name for the cron job
+				Spec:          "*/5 * * * * * *", // Cron schedule: every 5 seconds
+				Job:           jobFunction,       // The job function to execute
+				Logger:        appLogger,         // Logger for logging job activities
+				BeforeExecute: beforeExecute,     // BeforeExecute hook for conditional execution
 			}
 
 			// Create a new cron job instance
@@ -88,7 +120,7 @@ func main() {
 				return
 			}
 
-			// Start the cron job in a separate goroutine
+			// Start the cron job
 			if err := cronJob.Start(ctx); err != nil {
 				appLogger.Error(ctx, "Failed to start cron job.", map[string]interface{}{"error": err})
 				return
@@ -96,8 +128,20 @@ func main() {
 
 			appLogger.Info(ctx, "Cron job started successfully.", nil)
 
-			// Wait for the context to be canceled (e.g., via an OS signal)
-			<-ctx.Done()
+			// Create a context with a timeout of 1 minute
+			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 24*time.Hour)
+			defer timeoutCancel()
+
+			// Wait for either the parent context to be canceled or the timeout to occur
+			select {
+			case <-timeoutCtx.Done():
+				if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
+					appLogger.Info(ctx, "Timeout reached. Initiating shutdown...", nil)
+					cancel() // Cancel the parent context to initiate shutdown
+				}
+			case <-ctx.Done():
+				// Context was canceled externally (e.g., via OS signal)
+			}
 
 			// Stop the cron job gracefully
 			if err := cronJob.Stop(ctx); err != nil {

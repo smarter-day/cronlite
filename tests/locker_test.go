@@ -2,7 +2,7 @@ package tests
 
 import (
 	"context"
-	"cronlite"
+	"cronlite/locker"
 	"cronlite/mocks"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/mock/gomock"
@@ -28,7 +28,7 @@ func TestLocker_Acquire(t *testing.T) {
 		Debug(gomock.Any(), "Acquiring lock", gomock.Any()).
 		Times(1)
 
-	l := cronlite.NewLocker(cronlite.LockerOptions{
+	l := locker.NewLocker(locker.LockerOptions{
 		Name:    "test-lock",
 		Redis:   mockRedis,
 		Logger:  logger,
@@ -58,7 +58,7 @@ func TestLocker_Acquire_AlreadyLocked(t *testing.T) {
 		Debug(gomock.Any(), "Acquiring lock", gomock.Any()).
 		Times(1)
 
-	l := cronlite.NewLocker(cronlite.LockerOptions{
+	l := locker.NewLocker(locker.LockerOptions{
 		Name:   "test-lock",
 		Redis:  mockRedis,
 		Logger: logger,
@@ -87,7 +87,7 @@ func TestLocker_Release(t *testing.T) {
 		Debug(gomock.Any(), "Released lock", gomock.Any()).
 		Times(1)
 
-	l := cronlite.NewLocker(cronlite.LockerOptions{
+	l := locker.NewLocker(locker.LockerOptions{
 		Name:   "test-lock",
 		Redis:  mockRedis,
 		Logger: logger,
@@ -117,7 +117,7 @@ func TestLocker_Extend(t *testing.T) {
 		Debug(gomock.Any(), "Extended lock", gomock.Any()).
 		Times(1)
 
-	l := cronlite.NewLocker(cronlite.LockerOptions{
+	l := locker.NewLocker(locker.LockerOptions{
 		Name:    "test-lock",
 		Redis:   mockRedis,
 		Logger:  logger,
@@ -131,7 +131,7 @@ func TestLocker_Extend(t *testing.T) {
 }
 
 func TestLocker_GetLockTTL(t *testing.T) {
-	l := cronlite.NewLocker(cronlite.LockerOptions{
+	l := locker.NewLocker(locker.LockerOptions{
 		Name:    "test-lock",
 		LockTTL: 10 * time.Second,
 	})
