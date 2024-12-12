@@ -97,3 +97,15 @@ func (mr *MockILockerMockRecorder) Release(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Release", reflect.TypeOf((*MockILocker)(nil).Release), ctx)
 }
+
+// SetTTL mocks base method.
+func (m *MockILocker) SetTTL(duration time.Duration) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetTTL", duration)
+}
+
+// SetTTL indicates an expected call of SetTTL.
+func (mr *MockILockerMockRecorder) SetTTL(duration any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTTL", reflect.TypeOf((*MockILocker)(nil).SetTTL), duration)
+}

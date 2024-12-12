@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"cronlite/examples"
+	"cronlite/helpers"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"os"
 	"time"
 
@@ -21,7 +22,7 @@ func main() {
 	defer cancel()
 
 	// Set up signal capturing to handle graceful shutdown
-	examples.SetupSignalHandler(cancel)
+	helpers.SetupSignalHandler(cancel)
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -47,7 +48,9 @@ func main() {
 			}
 
 			// Initialize the Redis client
-			redisClient := examples.InitializeRedisClient("localhost:6379")
+			redisClient := helpers.InitializeRedisClient(&redis.Options{
+				Addr: "localhost:6379",
+			})
 			defer func() {
 				if err := redisClient.Close(); err != nil {
 					fmt.Printf("Error closing Redis client: %v\n", err)

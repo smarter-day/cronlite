@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gorhill/cronexpr"
-	"github.com/redis/go-redis/v9"
 	"time"
 )
 
+// NewJob creates a new Job instance with the provided options
 func NewJob(options JobOptions) (IJob, error) {
 	if options.Logger == nil {
 		options.Logger = &logger.LogLogger{}
@@ -37,7 +37,7 @@ func NewJob(options JobOptions) (IJob, error) {
 	}
 
 	if options.Locker == nil {
-		lockerOptions := locker.LockerOptions{
+		lockerOptions := locker.Options{
 			Name:    options.Name,
 			Redis:   options.Redis,
 			Logger:  options.Logger,
@@ -46,40 +46,54 @@ func NewJob(options JobOptions) (IJob, error) {
 		options.Locker = locker.NewLocker(lockerOptions)
 	}
 
-	return &Job{
+	job := &Job{
 		Options:    options,
 		CronExpr:   expr,
-		StateKey:   fmt.Sprintf(JobStateKeyFormat, options.Name),
 		StopSignal: make(chan bool),
-	}, nil
+	}
+
+	stateKey := fmt.Sprintf(JobStateKeyFormat, options.Name)
+	job.State = NewState(
+		options.Redis,
+		stateKey,
+		options.Logger,
+		job.OnStateUpdated,
+	)
+
+	return job, nil
 }
 
+// OnStateUpdated is called whenever the job state changes
+func (cj *Job) OnStateUpdated(ctx context.Context, state *JobState) error {
+	cj.Options.Logger.Info(ctx, "Job state changed", map[string]interface{}{"name": cj.Options.Name})
+	if stateSpec, ok := state.Data["spec"].(string); ok && stateSpec != cj.Options.Spec {
+		cj.Options.Logger.Info(ctx, "Updating cron expression", map[string]interface{}{"name": cj.Options.Name, "new_spec": stateSpec, "old_spec": cj.Options.Spec})
+		if expr, err := cronexpr.Parse(stateSpec); err == nil {
+			cj.CronExpr = expr
+			cj.Options.Spec = stateSpec
+			cj.Options.Locker.SetTTL(time.Until(cj.CronExpr.Next(time.Now())) + 5*time.Second)
+			now := time.Now()
+			state.LastRun = now
+			state.NextRun = cj.CronExpr.Next(now)
+			state.UpdatedAt = time.Now()
+		} else {
+			cj.Options.Logger.Error(ctx, "Invalid cron expression", map[string]interface{}{"name": cj.Options.Name, "error": err})
+		}
+	}
+	return nil
+}
+
+// Run starts the job execution loop
+
+// Stop gracefully stops the job
 func (cj *Job) Stop(ctx context.Context) error {
 	close(cj.StopSignal)
 	return nil
 }
 
-func (cj *Job) getLatestState(ctx context.Context, currentState *JobState) (*JobState, error) {
-	redisState, err := LoadJobStateFromRedis(ctx, cj.Options.Redis, cj.Options.Name)
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return currentState, nil // no newer state exists
-		}
-		return nil, fmt.Errorf("failed to fetch latest job state: %w", err)
-	}
-
-	if redisState.LastRun.After(currentState.LastRun) ||
-		redisState.NextRun.After(currentState.NextRun) ||
-		redisState.UpdatedAt.After(currentState.UpdatedAt) {
-		cj.Options.Logger.Debug(ctx, "Updated job settings detected in Redis", map[string]interface{}{"name": cj.Options.Name})
-		return redisState, nil
-	}
-	return currentState, nil
-}
-
+// execute runs the job's function with proper state management
 func (cj *Job) execute(ctx context.Context, state *JobState) {
-	cj.Mutex.Lock()
-	defer cj.Mutex.Unlock()
+	// IMPORTANT: Do NOT acquire the stateMutex here as it's already held by the caller.
 
 	// Acquire the lock
 	success, err := cj.Options.Locker.Acquire(ctx)
@@ -101,11 +115,11 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 			cj.Options.Logger.Error(ctx, "Failed to execute BeforeExecute callback", map[string]interface{}{"name": cj.Options.Name, "error": err})
 			state.Status = JobStatusFailed
 			if state.Data == nil {
-				state.Data = map[string]interface{}{}
+				state.Data = make(map[string]interface{})
 			}
 			state.Data["error_message"] = err.Error()
 			state.UpdatedAt = time.Now()
-			if saveErr := cj.SaveState(ctx, state); saveErr != nil {
+			if saveErr := cj.State.Save(ctx, state); saveErr != nil { // Save in-memory state
 				cj.Options.Logger.Error(ctx, "Failed to save updated job state", map[string]interface{}{"name": cj.Options.Name, "error": saveErr})
 			}
 			return
@@ -123,12 +137,12 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 		cj.Options.Logger.Error(ctx, "Failed to get worker ID", map[string]interface{}{"error": err})
 		state.Status = JobStatusFailed
 		if state.Data == nil {
-			state.Data = map[string]interface{}{}
+			state.Data = make(map[string]interface{})
 		}
 		state.Data["error_message"] = err.Error()
 		state.UpdatedAt = time.Now()
-		if saveErr := cj.SaveState(ctx, state); saveErr != nil {
-			cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": saveErr})
+		if saveErr := cj.State.Save(ctx, state); saveErr != nil { // Save in-memory state
+			cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"name": cj.Options.Name, "error": saveErr})
 		}
 		// AfterExecute is called only after an actual execution attempt.
 		if cj.Options.AfterExecute != nil {
@@ -146,7 +160,7 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 		state.UpdatedAt = time.Now()
 	}
 
-	if err = cj.SaveState(ctx, state); err != nil {
+	if err = cj.State.Save(ctx, state); err != nil { // Save in-memory state
 		cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": err})
 	}
 
@@ -162,7 +176,7 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 		cj.Options.Logger.Error(ctx, "Error executing cron job", map[string]interface{}{"name": cj.Options.Name, "error": jobErr})
 		state.Status = JobStatusFailed
 		if state.Data == nil {
-			state.Data = map[string]interface{}{}
+			state.Data = make(map[string]interface{})
 		}
 		state.Data["error_message"] = jobErr.Error()
 	} else {
@@ -173,12 +187,6 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 		}
 	}
 
-	// Final update after execution
-	state.UpdatedAt = time.Now()
-	if err = cj.SaveState(ctx, state); err != nil {
-		cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": err})
-	}
-
 	// Call AfterExecute if defined
 	if cj.Options.AfterExecute != nil {
 		afterErr := cj.Options.AfterExecute(ctx, cj, jobErr)
@@ -186,12 +194,15 @@ func (cj *Job) execute(ctx context.Context, state *JobState) {
 			cj.Options.Logger.Error(ctx, "AfterExecute callback returned an error", map[string]interface{}{"name": cj.Options.Name, "error": afterErr})
 		}
 	}
+
+	// Final update after execution
+	state.UpdatedAt = time.Now()
+	if err = cj.State.Save(ctx, state); err != nil { // Save in-memory state
+		cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": err})
+	}
 }
 
-func (cj *Job) SaveState(ctx context.Context, state *JobState) error {
-	return SaveJobStateToRedis(ctx, cj.Options.Redis, cj.Options.Name, state)
-}
-
+// extendLockPeriodically keeps the lock alive and updates the heartbeat
 func (cj *Job) extendLockPeriodically(ctx context.Context, state *JobState) {
 	ttl := cj.Options.Locker.GetLockTTL()
 
@@ -220,13 +231,14 @@ func (cj *Job) extendLockPeriodically(ctx context.Context, state *JobState) {
 
 			// Update heartbeat to mark the job as still alive
 			state.UpdatedAt = time.Now()
-			if saveErr := cj.SaveState(ctx, state); saveErr != nil {
-				cj.Options.Logger.Error(ctx, "Failed to update heartbeat in job state", map[string]interface{}{"error": saveErr})
+			if err := cj.State.Save(ctx, state); err != nil { // Save in-memory state
+				cj.Options.Logger.Error(ctx, "Failed to update heartbeat in job state", map[string]interface{}{"error": err})
 			}
 		}
 	}
 }
 
+// IsRunningByMe checks if the job is currently running by this worker
 func (cj *Job) IsRunningByMe(ctx context.Context, state *JobState) (bool, error) {
 	if state == nil {
 		return false, fmt.Errorf("job state is nil")
@@ -246,12 +258,34 @@ func (cj *Job) IsRunningByMe(ctx context.Context, state *JobState) (bool, error)
 	return state.RunningBy == runningBy, nil
 }
 
+// Start begins the job's execution loop
 func (cj *Job) Start(ctx context.Context) error {
 	// Load initial state
-	state, err := cj.GetState(ctx)
+	state, err := cj.State.Get(ctx, true)
 	if err != nil {
-		cj.Options.Logger.Error(ctx, "Failed to fetch job state", map[string]interface{}{"error": err})
+		cj.Options.Logger.Error(ctx, "Failed to load job state", map[string]interface{}{"error": err})
 		return err
+	}
+
+	// If state is nil, initialize a default state
+	if state == nil {
+		state = &JobState{
+			Status:     JobStatusNotRunning,
+			LastRun:    time.Time{},
+			NextRun:    cj.CronExpr.Next(time.Now()),
+			Iterations: 0,                            // Initially 0 iterations
+			Data:       make(map[string]interface{}), // Initialize as empty map
+			UpdatedAt:  time.Now(),
+			CreatedAt:  time.Now(),
+		}
+		// Optionally, store the cron spec in Data for potential updates
+		state.Data["spec"] = cj.Options.Spec
+
+		// Save the default state
+		if saveErr := cj.State.Save(ctx, state); saveErr != nil {
+			cj.Options.Logger.Error(ctx, "Failed to initialize job state", map[string]interface{}{"error": saveErr})
+			return fmt.Errorf("failed to initialize job state: %w", saveErr)
+		}
 	}
 
 	// Call BeforeStart if defined
@@ -268,15 +302,14 @@ func (cj *Job) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		timer := time.NewTicker(1 * time.Second)
-		defer timer.Stop()
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
 
 		isRunning := false
 		refreshInterval := time.Until(state.NextRun) / 2
 		if refreshInterval < time.Second {
 			refreshInterval = time.Second
 		}
-		lastFetchTime := time.Now()
 
 		for {
 			select {
@@ -284,7 +317,7 @@ func (cj *Job) Start(ctx context.Context) error {
 				if isRunning {
 					state.Status = JobStatusCancelled
 					state.UpdatedAt = time.Now()
-					if err = cj.SaveState(ctx, state); err != nil {
+					if err := cj.State.Save(ctx, state); err != nil { // Save in-memory state
 						cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": err})
 					}
 					cj.Options.Logger.Info(ctx, "Cron job stopped by context", map[string]interface{}{"name": cj.Options.Name})
@@ -296,7 +329,7 @@ func (cj *Job) Start(ctx context.Context) error {
 				if isRunning {
 					state.Status = JobStatusCancelled
 					state.UpdatedAt = time.Now()
-					if err = cj.SaveState(ctx, state); err != nil {
+					if err := cj.State.Save(ctx, state); err != nil { // Save in-memory state
 						cj.Options.Logger.Error(ctx, "Failed to save job state", map[string]interface{}{"error": err})
 					}
 					cj.Options.Logger.Info(ctx, "Cron job force stopped while running", map[string]interface{}{"name": cj.Options.Name})
@@ -304,68 +337,20 @@ func (cj *Job) Start(ctx context.Context) error {
 					cj.Options.Logger.Info(ctx, "Cron job force stopped without active execution", map[string]interface{}{"name": cj.Options.Name})
 				}
 				return
-			case <-timer.C:
+			case <-ticker.C:
 				now := time.Now()
 
-				// Update state if needed
-				if now.Sub(lastFetchTime) >= refreshInterval && (now.After(state.NextRun) || state.NextRun.Sub(now) <= 10*time.Second) {
-					updatedState, err := cj.getLatestState(ctx, state)
-					if err != nil {
-						cj.Options.Logger.Error(ctx, "Failed to fetch updated job state", map[string]interface{}{"error": err})
-					} else {
-						state = updatedState
-						lastFetchTime = time.Now()
-						refreshInterval = time.Until(state.NextRun) / 2
-						if refreshInterval < time.Second {
-							refreshInterval = time.Second
-						}
-					}
-
-					// Check if spec has been dynamically updated and change it and expression
-					//currentSpec := cj.Options.Spec
-					//updatedSpecData := updatedState.Data["spec"]
-					//var updatedSpec string
-					//if updatedSpecData != nil {
-					//	updatedSpec = updatedSpecData.(string)
-					//}
-					//if currentSpec != updatedSpec {
-					//	cj.Options.Logger.Info(ctx, "Cron job spec has been dynamically updated", map[string]interface{}{
-					//		"name":    cj.Options.Name,
-					//		"current": currentSpec,
-					//		"updated": updatedSpec,
-					//	})
-					//	newCronExpr, err := cronexpr.Parse(updatedSpec)
-					//	if err != nil {
-					//		cj.Options.Logger.Error(ctx, "Failed to parse cron expression", map[string]interface{}{
-					//			"name":       cj.Options.Name,
-					//			"expression": cj.Options.Spec,
-					//			"error":      err,
-					//		})
-					//		state.Data["spec"] = currentSpec
-					//		err := cj.SaveState(ctx, state)
-					//		if err != nil {
-					//			cj.Options.Logger.Error(ctx, "Failed to save stale job state", map[string]interface{}{"error": err})
-					//		}
-					//		continue
-					//	}
-					//	cj.Options.Spec = updatedSpec
-					//	cj.CronExpr = newCronExpr
-					//	state.NextRun = cj.CronExpr.Next(time.Now())
-					//	cj.Options.Logger.Info(ctx, "Cron job spec updated spec successfully", map[string]interface{}{"name": cj.Options.Name})
-					//}
-				}
-
-				// Check if stale
+				// Check if the job is stale
 				if state.Status == JobStatusRunning && time.Since(state.UpdatedAt) > StaleThreshold {
 					cj.Options.Logger.Warning(ctx, "Job appears stale, considering it not running", map[string]interface{}{"name": cj.Options.Name})
 					state.RunningBy = ""
 					state.Status = JobStatusFailed
 					if state.Data == nil {
-						state.Data = map[string]interface{}{}
+						state.Data = make(map[string]interface{})
 					}
 					state.Data["error_message"] = "stale job detected"
 					state.UpdatedAt = time.Now()
-					if err := cj.SaveState(ctx, state); err != nil {
+					if err := cj.State.Save(ctx, state); err != nil { // Save in-memory state
 						cj.Options.Logger.Error(ctx, "Failed to save stale job state", map[string]interface{}{"error": err})
 					}
 				}
@@ -396,64 +381,21 @@ func (cj *Job) Start(ctx context.Context) error {
 				isRunning = true
 				cj.execute(ctx, state)
 				isRunning = false
-				time.Sleep(time.Until(state.NextRun) - 1*time.Second)
+
+				// Sleep until just before the next run
+				sleepDuration := time.Until(state.NextRun) - 1*time.Second
+				if sleepDuration > 0 {
+					time.Sleep(sleepDuration)
+				} else {
+					// If NextRun is in the past, set sleep to minimal duration
+					time.Sleep(1 * time.Second)
+				}
 			}
 		}
 	}()
 	return nil
 }
 
-func (cj *Job) GetState(ctx context.Context) (*JobState, error) {
-	state, err := LoadJobStateFromRedis(ctx, cj.Options.Redis, cj.Options.Name)
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			// Initialize default state if not found, incorporating MaxIterations and UntilTime from JobOptions
-			defaultState := &JobState{
-				Status:     "", // Not running
-				LastRun:    time.Time{},
-				NextRun:    cj.CronExpr.Next(time.Now()),
-				Iterations: 0,                        // Initially 0 iterations
-				Data:       map[string]interface{}{}, // Initialize as empty map
-				UpdatedAt:  time.Now(),
-				CreatedAt:  time.Now(),
-			}
-			// Optionally, store the cron spec in Data for potential updates
-			defaultState.Data["spec"] = cj.Options.Spec
-
-			if saveErr := cj.SaveState(ctx, defaultState); saveErr != nil {
-				return nil, fmt.Errorf("failed to initialize job state: %w", saveErr)
-			}
-			return defaultState, nil
-		}
-		return nil, fmt.Errorf("failed to fetch job state from Redis: %w", err)
-	}
-
-	// Update cron expr if spec is present in state
-	if spec, ok := state.Data["spec"].(string); ok {
-		cj.CronExpr = cronexpr.MustParse(spec)
-		state.NextRun = cj.CronExpr.Next(time.Now())
-	}
-
-	// If UpdatedAt is zero, set it now
-	if state.UpdatedAt.IsZero() {
-		state.UpdatedAt = time.Now()
-		if saveErr := cj.SaveState(ctx, state); saveErr != nil {
-			cj.Options.Logger.Error(ctx, "Failed to update job state with updated_at", map[string]interface{}{"error": saveErr})
-		}
-	}
-
-	return state, nil
-}
-
-func (cj *Job) Delete(ctx context.Context) error {
-	pipe := cj.Options.Redis.TxPipeline()
-	pipe.Del(ctx, cj.StateKey)
-	pipe.ZRem(ctx, JobsList, cj.Options.Name)
-
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to delete job from Redis: %w", err)
-	}
-	cj.Options.Logger.Info(ctx, "Job deleted successfully", map[string]interface{}{"name": cj.Options.Name})
-	return nil
+func (cj *Job) GetState() IState {
+	return cj.State
 }

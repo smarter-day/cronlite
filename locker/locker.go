@@ -23,10 +23,11 @@ type ILocker interface {
 	Release(ctx context.Context) error
 	Extend(ctx context.Context) error
 	GetLockTTL() time.Duration
+	SetTTL(duration time.Duration)
 }
 
-// LockerOptions defines options for configuring a Locker
-type LockerOptions struct {
+// Options defines options for configuring a Locker
+type Options struct {
 	Name    string
 	Redis   redis.Cmdable
 	Logger  logger.ILogger
@@ -36,11 +37,11 @@ type LockerOptions struct {
 // Locker implements ILocker
 type Locker struct {
 	mu      sync.Mutex
-	options LockerOptions
+	options Options
 }
 
 // NewLocker initializes a new locker
-func NewLocker(options LockerOptions) ILocker {
+func NewLocker(options Options) ILocker {
 	if options.Logger == nil {
 		options.Logger = &logger.LogLogger{}
 	}
@@ -93,4 +94,8 @@ func (l *Locker) Extend(ctx context.Context) error {
 
 func (l *Locker) GetLockTTL() time.Duration {
 	return l.options.LockTTL
+}
+
+func (l *Locker) SetTTL(duration time.Duration) {
+	l.options.LockTTL = duration
 }

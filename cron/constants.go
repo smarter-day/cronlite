@@ -13,8 +13,9 @@ const (
 	// When no updates (heartbeats) within 20s, consider not running.
 	StaleThreshold = 20 * time.Second
 
-	JobStatusRunning   JobStatus = "Running"
-	JobStatusCancelled JobStatus = "Cancelled"
-	JobStatusFailed    JobStatus = "Failed"
-	JobStatusSuccess   JobStatus = "Success"
+	JobStatusNotRunning           = ""
+	JobStatusRunning    JobStatus = "Running"
+	JobStatusCancelled  JobStatus = "Cancelled"
+	JobStatusFailed     JobStatus = "Failed"
+	JobStatusSuccess    JobStatus = "Success"
 )

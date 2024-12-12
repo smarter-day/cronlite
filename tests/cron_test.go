@@ -264,8 +264,8 @@ func TestCronJob_GetJobState_DefaultState(t *testing.T) {
 		Return(redis.NewStringResult("", redis.Nil)).
 		Times(1)
 
-	// Since the state does not exist, GetState will create a default state and call SaveState.
-	// SaveState uses TxPipeline, Set, ZAdd, Exec.
+	// Since the state does not exist, Get will create a default state and call Save.
+	// Save uses TxPipeline, Set, ZAdd, Exec.
 	mockRedis.EXPECT().
 		TxPipeline().
 		Return(mockPipeline).

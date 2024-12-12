@@ -41,47 +41,32 @@ func (m *MockIJob) EXPECT() *MockIJobMockRecorder {
 	return m.recorder
 }
 
-// Delete mocks base method.
-func (m *MockIJob) Delete(ctx context.Context) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Delete", ctx)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Delete indicates an expected call of Delete.
-func (mr *MockIJobMockRecorder) Delete(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockIJob)(nil).Delete), ctx)
-}
-
 // GetState mocks base method.
-func (m *MockIJob) GetState(ctx context.Context) (*cron.JobState, error) {
+func (m *MockIJob) GetState() cron.IState {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetState", ctx)
-	ret0, _ := ret[0].(*cron.JobState)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "GetState")
+	ret0, _ := ret[0].(cron.IState)
+	return ret0
 }
 
 // GetState indicates an expected call of GetState.
-func (mr *MockIJobMockRecorder) GetState(ctx any) *gomock.Call {
+func (mr *MockIJobMockRecorder) GetState() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetState", reflect.TypeOf((*MockIJob)(nil).GetState), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetState", reflect.TypeOf((*MockIJob)(nil).GetState))
 }
 
-// SaveState mocks base method.
-func (m *MockIJob) SaveState(ctx context.Context, state *cron.JobState) error {
+// OnStateUpdated mocks base method.
+func (m *MockIJob) OnStateUpdated(ctx context.Context, state *cron.JobState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveState", ctx, state)
+	ret := m.ctrl.Call(m, "OnStateUpdated", ctx, state)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// SaveState indicates an expected call of SaveState.
-func (mr *MockIJobMockRecorder) SaveState(ctx, state any) *gomock.Call {
+// OnStateUpdated indicates an expected call of OnStateUpdated.
+func (mr *MockIJobMockRecorder) OnStateUpdated(ctx, state any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveState", reflect.TypeOf((*MockIJob)(nil).SaveState), ctx, state)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnStateUpdated", reflect.TypeOf((*MockIJob)(nil).OnStateUpdated), ctx, state)
 }
 
 // Start mocks base method.
@@ -149,4 +134,86 @@ func (m *MockIWorkerIdProvider) Id() (string, error) {
 func (mr *MockIWorkerIdProviderMockRecorder) Id() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Id", reflect.TypeOf((*MockIWorkerIdProvider)(nil).Id))
+}
+
+// MockIState is a mock of IState interface.
+type MockIState struct {
+	ctrl     *gomock.Controller
+	recorder *MockIStateMockRecorder
+	isgomock struct{}
+}
+
+// MockIStateMockRecorder is the mock recorder for MockIState.
+type MockIStateMockRecorder struct {
+	mock *MockIState
+}
+
+// NewMockIState creates a new mock instance.
+func NewMockIState(ctrl *gomock.Controller) *MockIState {
+	mock := &MockIState{ctrl: ctrl}
+	mock.recorder = &MockIStateMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockIState) EXPECT() *MockIStateMockRecorder {
+	return m.recorder
+}
+
+// Delete mocks base method.
+func (m *MockIState) Delete(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockIStateMockRecorder) Delete(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockIState)(nil).Delete), ctx)
+}
+
+// Exists mocks base method.
+func (m *MockIState) Exists(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Exists", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exists indicates an expected call of Exists.
+func (mr *MockIStateMockRecorder) Exists(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockIState)(nil).Exists), ctx)
+}
+
+// Get mocks base method.
+func (m *MockIState) Get(ctx context.Context, force bool) (*cron.JobState, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx, force)
+	ret0, _ := ret[0].(*cron.JobState)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockIStateMockRecorder) Get(ctx, force any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockIState)(nil).Get), ctx, force)
+}
+
+// Save mocks base method.
+func (m *MockIState) Save(ctx context.Context, state *cron.JobState) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Save", ctx, state)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Save indicates an expected call of Save.
+func (mr *MockIStateMockRecorder) Save(ctx, state any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockIState)(nil).Save), ctx, state)
 }

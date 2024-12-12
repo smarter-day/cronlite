@@ -1,4 +1,4 @@
-package examples
+package helpers
 
 import (
 	"context"
@@ -12,11 +12,8 @@ import (
 
 // InitializeRedisClient initializes and returns a Redis client.
 // It connects to the specified Redis address with default options.
-func InitializeRedisClient(addr string) *redis.Client {
-	client := redis.NewClient(&redis.Options{
-		Addr: addr, // Redis server address
-		// You can add more options here, such as Password and DB
-	})
+func InitializeRedisClient(options *redis.Options) *redis.Client {
+	client := redis.NewClient(options)
 
 	// Ping the Redis server to ensure connectivity
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

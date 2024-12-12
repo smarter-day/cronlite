@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"cronlite/cron"
+	"cronlite/helpers"
 	"fmt"
 	"github.com/olekukonko/tablewriter"
 	"github.com/redis/go-redis/v9"
@@ -22,9 +23,8 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Define Redis connection details
-			redisAddr := "localhost:6379" // Change if Redis is running on a different host/port
-			redisClient := redis.NewClient(&redis.Options{
-				Addr: redisAddr,
+			redisClient := helpers.InitializeRedisClient(&redis.Options{
+				Addr: "localhost:6379",
 			})
 
 			limit, err := strconv.Atoi(args[0])

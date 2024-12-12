@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"cronlite/cron"
-	"cronlite/examples"
+	"cronlite/helpers"
 	"cronlite/logger"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"math/rand"
 	"os"
@@ -19,7 +20,7 @@ func main() {
 	defer cancel()
 
 	// Set up signal capturing to handle graceful shutdown
-	examples.SetupSignalHandler(cancel)
+	helpers.SetupSignalHandler(cancel)
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -45,7 +46,9 @@ func main() {
 			}
 
 			// Initialize the Redis client
-			redisClient := examples.InitializeRedisClient("localhost:6379")
+			redisClient := helpers.InitializeRedisClient(&redis.Options{
+				Addr: "localhost:6379",
+			})
 			defer func() {
 				if err := redisClient.Close(); err != nil {
 					fmt.Printf("Error closing Redis client: %v\n", err)
@@ -71,46 +74,46 @@ func main() {
 			}
 
 			// Define the BeforeExecute hook
-			beforeExecute := func(ctx context.Context, job *cron.Job) (bool, error) {
-				state, err := job.GetState(ctx)
+			afterExecute := func(ctx context.Context, job cron.IJob, err error) error {
+				state, err := job.GetState().Get(ctx, false)
 				if err != nil {
 					appLogger.Error(ctx, "Failed to retrieve job state.", map[string]interface{}{"error": err})
-					return false, err
+					return err
 				}
 
 				if state.Iterations == 0 {
 					// First execution, proceed as normal
-					return true, nil
+					return nil
 				}
 
 				// Generate random integer between 1 and 50
-				randomInt := rand.Intn(50) + 1
+				randomInt := rand.Intn(25) + 30
 				newSpec := fmt.Sprintf("*/%d * * * * * *", randomInt)
 
 				// Update the cron job's Spec
 				state.Data["spec"] = newSpec
-				err = job.SaveState(ctx, state)
+				err = job.GetState().Save(ctx, state)
 				if err != nil {
-					return false, err
+					return err
 				} // Save the updated state
 				if err != nil {
 					appLogger.Error(ctx, "Failed to update cron spec.", map[string]interface{}{"error": err})
-					return false, err
+					return err
 				}
 
 				appLogger.Info(ctx, "Changed cron spec by random integer seconds.", map[string]interface{}{"randomInt": randomInt})
 
-				return true, nil
+				return nil
 			}
 
 			// Define the cron job options
 			jobOptions := cron.JobOptions{
-				Redis:         redisClient,       // Redis client for state management and locking
-				Name:          jobName,           // Unique name for the cron job
-				Spec:          "*/5 * * * * * *", // Cron schedule: every 5 seconds
-				Job:           jobFunction,       // The job function to execute
-				Logger:        appLogger,         // Logger for logging job activities
-				BeforeExecute: beforeExecute,     // BeforeExecute hook for conditional execution
+				Redis:        redisClient,       // Redis client for state management and locking
+				Name:         jobName,           // Unique name for the cron job
+				Spec:         "*/5 * * * * * *", // Cron schedule: every 5 seconds
+				Job:          jobFunction,       // The job function to execute
+				Logger:       appLogger,         // Logger for logging job activities
+				AfterExecute: afterExecute,      // BeforeExecute hook for conditional execution
 			}
 
 			// Create a new cron job instance

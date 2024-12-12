@@ -12,8 +12,8 @@ import (
 )
 
 // LoadJobStateFromRedis loads the job state from Redis by job name
-func LoadJobStateFromRedis(ctx context.Context, redisClient redis.Cmdable, jobName string) (*JobState, error) {
-	data, err := redisClient.Get(ctx, fmt.Sprintf(JobStateKeyFormat, jobName)).Result()
+func LoadJobStateFromRedis(ctx context.Context, redisClient redis.Cmdable, stateKey string) (*JobState, error) {
+	data, err := redisClient.Get(ctx, stateKey).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +27,7 @@ func LoadJobStateFromRedis(ctx context.Context, redisClient redis.Cmdable, jobNa
 }
 
 // SaveJobStateToRedis saves the job state to Redis and updates the sorted set
-func SaveJobStateToRedis(ctx context.Context, redisClient redis.Cmdable, jobName string, state *JobState) error {
+func SaveJobStateToRedis(ctx context.Context, redisClient redis.Cmdable, stateKey string, state *JobState) error {
 	serializedState, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to serialize job state: %w", err)
@@ -35,7 +35,7 @@ func SaveJobStateToRedis(ctx context.Context, redisClient redis.Cmdable, jobName
 
 	pipe := redisClient.TxPipeline()
 
-	pipe.Set(ctx, fmt.Sprintf(JobStateKeyFormat, jobName), serializedState, 0)
+	pipe.Set(ctx, stateKey, serializedState, 0)
 
 	latestTimestamp := state.LastRun.Unix()
 	if latestTimestamp == 0 {
@@ -43,7 +43,7 @@ func SaveJobStateToRedis(ctx context.Context, redisClient redis.Cmdable, jobName
 	}
 	pipe.ZAdd(ctx, JobsList, redis.Z{
 		Score:  float64(latestTimestamp),
-		Member: jobName,
+		Member: stateKey,
 	})
 
 	_, err = pipe.Exec(ctx)
