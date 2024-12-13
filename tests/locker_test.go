@@ -31,7 +31,6 @@ func TestLocker_Acquire(t *testing.T) {
 	l := locker.NewLocker(locker.Options{
 		Name:    "test-lock",
 		Redis:   mockRedis,
-		Logger:  logger,
 		LockTTL: ttl,
 	})
 
@@ -59,9 +58,8 @@ func TestLocker_Acquire_AlreadyLocked(t *testing.T) {
 		Times(1)
 
 	l := locker.NewLocker(locker.Options{
-		Name:   "test-lock",
-		Redis:  mockRedis,
-		Logger: logger,
+		Name:  "test-lock",
+		Redis: mockRedis,
 	})
 
 	success, err := l.Acquire(context.Background())
@@ -88,9 +86,8 @@ func TestLocker_Release(t *testing.T) {
 		Times(1)
 
 	l := locker.NewLocker(locker.Options{
-		Name:   "test-lock",
-		Redis:  mockRedis,
-		Logger: logger,
+		Name:  "test-lock",
+		Redis: mockRedis,
 	})
 
 	err := l.Release(context.Background())
@@ -120,7 +117,6 @@ func TestLocker_Extend(t *testing.T) {
 	l := locker.NewLocker(locker.Options{
 		Name:    "test-lock",
 		Redis:   mockRedis,
-		Logger:  logger,
 		LockTTL: ttl,
 	})
 

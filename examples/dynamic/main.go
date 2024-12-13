@@ -20,7 +20,8 @@ func main() {
 	defer cancel()
 
 	// Set up signal capturing to handle graceful shutdown
-	helpers.SetupSignalHandler(cancel)
+	helpers.SetupTerminationSignalHandler(cancel)
+	log := logger.Log(context.Background())
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -31,7 +32,7 @@ func main() {
 			// Retrieve the job name from the flag
 			jobName, err := cmd.Flags().GetString("name")
 			if err != nil {
-				fmt.Printf("Error retrieving 'name' flag: %v\n", err)
+				log.WithError(err).Error("Error retrieving 'name' flag")
 				os.Exit(1)
 			}
 
@@ -55,29 +56,22 @@ func main() {
 				}
 			}()
 
-			// Initialize the logger
-			appLogger, err := logger.NewDynamicLogger("logrus", "debug")
-			if err != nil {
-				fmt.Printf("Failed to initialize logger: %v\n", err)
-				return
-			}
-
 			// Define the cron job function
-			jobFunction := func(ctx context.Context, job *cron.Job) error {
-				appLogger.Info(ctx, "Executing cron job: Performing a scheduled task.", nil)
+			jobFunction := func(ctx context.Context, job cron.ICronJob) error {
+				log.Info("Executing cron job: Performing a scheduled task")
 
 				// Simulate a task taking some time
 				time.Sleep(8 * time.Second)
 
-				appLogger.Info(ctx, "Cron job completed successfully.", nil)
+				log.Info("Cron job completed successfully")
 				return nil // Return nil to indicate success
 			}
 
-			// Define the BeforeExecute hook
-			afterExecute := func(ctx context.Context, job cron.IJob, err error) error {
+			// Define the BeforeExecuteFunc hook
+			afterExecute := func(ctx context.Context, job cron.ICronJob, err error) error {
 				state, err := job.GetState().Get(ctx, false)
 				if err != nil {
-					appLogger.Error(ctx, "Failed to retrieve job state.", map[string]interface{}{"error": err})
+					log.WithError(err).Error("Failed to get job state")
 					return err
 				}
 
@@ -87,49 +81,43 @@ func main() {
 				}
 
 				// Generate random integer between 1 and 50
-				randomInt := rand.Intn(3) + 1
-				newSpec := fmt.Sprintf("* */%d * * * * *", randomInt)
+				randomInt := rand.Intn(50) + 10
 
 				// Update the cron job's Spec
-				state.Data["spec"] = newSpec
+				state.Spec = fmt.Sprintf("*/%d * * * * * *", randomInt)
 				err = job.GetState().Save(ctx, state)
 				if err != nil {
-					return err
-				} // Save the updated state
-				if err != nil {
-					appLogger.Error(ctx, "Failed to update cron spec.", map[string]interface{}{"error": err})
+					log.WithError(err).Error("Failed to save updated job state")
 					return err
 				}
 
-				appLogger.Info(ctx, "Changed cron spec by random integer seconds.", map[string]interface{}{"randomInt": randomInt})
-
+				log.WithValues("newSpec", state.Spec).Info("Updated cron job's Spec")
 				return nil
 			}
 
 			// Define the cron job options
-			jobOptions := cron.JobOptions{
-				Redis:        redisClient,       // Redis client for state management and locking
-				Name:         jobName,           // Unique name for the cron job
-				Spec:         "*/5 * * * * * *", // Cron schedule: every 5 seconds
-				Job:          jobFunction,       // The job function to execute
-				Logger:       appLogger,         // Logger for logging job activities
-				AfterExecute: afterExecute,      // BeforeExecute hook for conditional execution
+			jobOptions := cron.CronJobOptions{
+				Redis:            redisClient,       // Redis client for state management and locking
+				Name:             jobName,           // Unique name for the cron job
+				Spec:             "*/5 * * * * * *", // CronJob initial schedule: every 5 seconds
+				ExecuteFunc:      jobFunction,       // The job function to execute
+				AfterExecuteFunc: afterExecute,      // BeforeExecuteFunc hook for conditional execution
 			}
 
 			// Create a new cron job instance
-			cronJob, err := cron.NewJob(jobOptions)
+			cronJob, err := cron.NewCronJob(jobOptions)
 			if err != nil {
-				appLogger.Error(ctx, "Failed to create cron job.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to create cron job.")
 				return
 			}
 
 			// Start the cron job
 			if err := cronJob.Start(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to start cron job.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to start cron job.")
 				return
 			}
 
-			appLogger.Info(ctx, "Cron job started successfully.", nil)
+			log.Info("CronJob job started successfully")
 
 			// Create a context with a timeout of 1 minute
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 24*time.Hour)
@@ -139,7 +127,7 @@ func main() {
 			select {
 			case <-timeoutCtx.Done():
 				if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
-					appLogger.Info(ctx, "Timeout reached. Initiating shutdown...", nil)
+					log.Info("Timeout reached. Initiating shutdown...")
 					cancel() // Cancel the parent context to initiate shutdown
 				}
 			case <-ctx.Done():
@@ -148,9 +136,9 @@ func main() {
 
 			// Stop the cron job gracefully
 			if err := cronJob.Stop(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to stop cron job gracefully.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to stop cron job gracefully")
 			} else {
-				appLogger.Info(ctx, "Cron job stopped gracefully.", nil)
+				log.Info("CronJob job stopped gracefully")
 			}
 		},
 	}
@@ -164,7 +152,7 @@ func main() {
 
 	// Execute the root command
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Printf("Error executing command: %v\n", err)
+		log.WithError(err).Error("Error executing command")
 		os.Exit(1)
 	}
 }

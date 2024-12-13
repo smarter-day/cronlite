@@ -51,7 +51,7 @@ func main() {
 				}
 
 				table := tablewriter.NewWriter(os.Stdout)
-				table.SetHeader([]string{"#", "Job Name", "Status", "Running By", "Last Run", "Next Run", "Iterations", "Created At", "Updated At"})
+				table.SetHeader([]string{"#", "CronJob Name", "Spec", "Status", "Running By", "Last Run", "Next Run", "Iterations", "Created At", "Updated At"})
 
 				formatRunningBy := func(s string) string {
 					if len(s) <= 10 {
@@ -70,6 +70,7 @@ func main() {
 					table.Append([]string{
 						strconv.Itoa(i + 1),
 						job.JobName,
+						job.State.Spec,
 						string(job.State.Status),
 						formatRunningBy(job.State.RunningBy),
 						lastRunStr,

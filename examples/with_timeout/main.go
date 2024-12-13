@@ -19,7 +19,7 @@ func main() {
 	defer cancel()
 
 	// Set up signal capturing to handle graceful shutdown
-	helpers.SetupSignalHandler(cancel)
+	helpers.SetupTerminationSignalHandler(cancel)
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -62,27 +62,27 @@ func main() {
 			}
 
 			// Define the cron job function
-			jobFunction := func(ctx context.Context, job *cron.Job) error {
+			jobFunction := func(ctx context.Context, job *cron.CronJob) error {
 				appLogger.Info(ctx, "Executing cron job: Performing a scheduled task.", nil)
 
 				// Simulate a task taking some time
 				time.Sleep(8 * time.Second)
 
-				appLogger.Info(ctx, "Cron job completed successfully.", nil)
+				appLogger.Info(ctx, "CronJob job completed successfully.", nil)
 				return nil // Return nil to indicate success
 			}
 
 			// Define the cron job options
-			jobOptions := cron.JobOptions{
-				Redis:  redisClient,       // Redis client for state management and locking
-				Name:   jobName,           // Unique name for the cron job
-				Spec:   "*/5 * * * * * *", // Cron schedule: every 5 seconds
-				Job:    jobFunction,       // The job function to execute
-				Logger: appLogger,         // Logger for logging job activities
+			jobOptions := cron.CronJobOptions{
+				Redis:       redisClient,       // Redis client for state management and locking
+				Name:        jobName,           // Unique name for the cron job
+				Spec:        "*/5 * * * * * *", // CronJob schedule: every 5 seconds
+				ExecuteFunc: jobFunction,       // The job function to execute
+				Logger:      appLogger,         // Logger for logging job activities
 			}
 
 			// Create a new cron job instance
-			cronJob, err := cron.NewJob(jobOptions)
+			cronJob, err := cron.NewCronJob(jobOptions)
 			if err != nil {
 				appLogger.Error(ctx, "Failed to create cron job.", map[string]interface{}{"error": err})
 				return
@@ -94,7 +94,7 @@ func main() {
 				return
 			}
 
-			appLogger.Info(ctx, "Cron job started successfully.", nil)
+			appLogger.Info(ctx, "CronJob job started successfully.", nil)
 
 			// Create a context with a timeout of 1 minute
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 1*time.Minute)
@@ -115,7 +115,7 @@ func main() {
 			if err := cronJob.Stop(ctx); err != nil {
 				appLogger.Error(ctx, "Failed to stop cron job gracefully.", map[string]interface{}{"error": err})
 			} else {
-				appLogger.Info(ctx, "Cron job stopped gracefully.", nil)
+				appLogger.Info(ctx, "CronJob job stopped gracefully.", nil)
 			}
 		},
 	}

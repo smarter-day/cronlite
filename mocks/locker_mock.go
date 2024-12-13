@@ -11,6 +11,7 @@ package mocks
 
 import (
 	context "context"
+	locker "cronlite/locker"
 	reflect "reflect"
 	time "time"
 
@@ -99,9 +100,11 @@ func (mr *MockILockerMockRecorder) Release(ctx any) *gomock.Call {
 }
 
 // SetTTL mocks base method.
-func (m *MockILocker) SetTTL(duration time.Duration) {
+func (m *MockILocker) SetTTL(duration time.Duration) locker.ILocker {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetTTL", duration)
+	ret := m.ctrl.Call(m, "SetTTL", duration)
+	ret0, _ := ret[0].(locker.ILocker)
+	return ret0
 }
 
 // SetTTL indicates an expected call of SetTTL.

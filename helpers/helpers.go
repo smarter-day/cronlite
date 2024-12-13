@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"context"
+	"cronlite/logger"
 	"fmt"
 	"github.com/redis/go-redis/v9"
 	"os"
@@ -10,8 +11,16 @@ import (
 	"time"
 )
 
-// InitializeRedisClient initializes and returns a Redis client.
-// It connects to the specified Redis address with default options.
+// InitializeRedisClient creates and returns a new Redis client using the provided options.
+// It pings the Redis server to ensure connectivity and exits the program if the connection fails.
+//
+// Parameters:
+//
+//	options - A pointer to redis.Options containing the configuration for the Redis client.
+//
+// Returns:
+//
+//	A pointer to a redis.Client that is connected to the Redis server.
 func InitializeRedisClient(options *redis.Options) *redis.Client {
 	client := redis.NewClient(options)
 
@@ -27,19 +36,26 @@ func InitializeRedisClient(options *redis.Options) *redis.Client {
 	return client
 }
 
-// SetupSignalHandler sets up OS signal capturing to allow graceful shutdown.
-// It listens for SIGINT and SIGTERM signals and cancels the provided context when received.
-func SetupSignalHandler(cancelFunc context.CancelFunc) {
+// SetupTerminationSignalHandler sets up a signal handler to gracefully handle OS signals
+// such as SIGINT and SIGTERM. When a signal is received, it calls the provided
+// cancel function to initiate a shutdown process.
+//
+// Parameters:
+//
+//	cancelFunc - A context.CancelFunc that is called to cancel the context
+//	             and initiate the shutdown process when a signal is received.
+func SetupTerminationSignalHandler(cancelFunc context.CancelFunc) {
 	// Create a channel to receive OS signals
 	sigChan := make(chan os.Signal, 1)
 
 	// Notify the channel on SIGINT and SIGTERM
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2)
 
 	// Start a goroutine to listen for signals
 	go func() {
 		sig := <-sigChan
-		fmt.Printf("Received signal: %s. Initiating shutdown...\n", sig)
+		logger.Log(context.Background()).WithValues("signal", sig).
+			Info("Received termination signal. Initiating shutdown...")
 		cancelFunc()
 	}()
 }

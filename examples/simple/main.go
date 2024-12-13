@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"cronlite/helpers"
-	"fmt"
 	"github.com/redis/go-redis/v9"
 	"os"
 	"time"
@@ -22,7 +21,8 @@ func main() {
 	defer cancel()
 
 	// Set up signal capturing to handle graceful shutdown
-	helpers.SetupSignalHandler(cancel)
+	helpers.SetupTerminationSignalHandler(cancel)
+	log := logger.Log(context.Background())
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -30,16 +30,17 @@ func main() {
 		Short: "A CLI tool to manage cron jobs using cronlite",
 		Long:  `An example application demonstrating how to use cronlite with Cobra for scheduling cron jobs in Go.`,
 		Run: func(cmd *cobra.Command, args []string) {
+
 			// Retrieve the job name from the flag
 			jobName, err := cmd.Flags().GetString("name")
 			if err != nil {
-				fmt.Printf("Error retrieving 'name' flag: %v\n", err)
+				log.WithError(err).Error("Error retrieving 'name' flag")
 				os.Exit(1)
 			}
 
 			// Validate that the job name is provided
 			if jobName == "" {
-				fmt.Println("Error: --name flag is required.")
+				log.Error("Error: --name flag is required")
 				err := cmd.Usage()
 				if err != nil {
 					return
@@ -53,60 +54,52 @@ func main() {
 			})
 			defer func() {
 				if err := redisClient.Close(); err != nil {
-					fmt.Printf("Error closing Redis client: %v\n", err)
+					log.WithError(err).Error("Error closing Redis client")
 				}
 			}()
 
-			// Initialize the logger
-			appLogger, err := logger.NewDynamicLogger("logrus", "debug")
-			if err != nil {
-				fmt.Printf("Failed to initialize logger: %v\n", err)
-				return
-			}
-
 			// Define the cron job function
-			jobFunction := func(ctx context.Context, job *cron.Job) error {
-				appLogger.Info(ctx, "Executing cron job: Performing a scheduled task.", nil)
+			jobFunction := func(ctx context.Context, job cron.ICronJob) error {
+				log.Info("Executing cron job: Performing a scheduled task")
 
 				// Simulate a task taking some time
-				time.Sleep(8 * time.Second)
+				time.Sleep(2 * time.Second)
 
-				appLogger.Info(ctx, "Cron job completed successfully.", nil)
+				log.Info("Cron job completed successfully")
 				return nil // Return nil to indicate success
 			}
 
 			// Define the cron job options
-			jobOptions := cron.JobOptions{
-				Redis:  redisClient,       // Redis client for state management and locking
-				Name:   jobName,           // Unique name for the cron job
-				Spec:   "*/5 * * * * * *", // Cron schedule: every 5 seconds
-				Job:    jobFunction,       // The job function to execute
-				Logger: appLogger,         // Logger for logging job activities
+			jobOptions := cron.CronJobOptions{
+				Redis:       redisClient,        // Redis client for state management and locking
+				Name:        jobName,            // Unique name for the cron job
+				Spec:        "*/15 * * * * * *", // CronJob schedule: every 5 seconds
+				ExecuteFunc: jobFunction,        // The job function to execute
 			}
 
 			// Create a new cron job instance
-			cronJob, err := cron.NewJob(jobOptions)
+			cronJob, err := cron.NewCronJob(jobOptions)
 			if err != nil {
-				appLogger.Error(ctx, "Failed to create cron job.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to create cron job")
 				return
 			}
 
 			// Start the cron job in a separate goroutine
 			if err := cronJob.Start(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to start cron job.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to start cron job")
 				return
 			}
 
-			appLogger.Info(ctx, "Cron job started successfully.", nil)
+			log.Info("CronJob job started successfully")
 
 			// Wait for the context to be canceled (e.g., via an OS signal)
 			<-ctx.Done()
 
 			// Stop the cron job gracefully
 			if err := cronJob.Stop(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to stop cron job gracefully.", map[string]interface{}{"error": err})
+				log.WithError(err).Error("Failed to stop cron job gracefully")
 			} else {
-				appLogger.Info(ctx, "Cron job stopped gracefully.", nil)
+				log.Info("CronJob job stopped gracefully")
 			}
 		},
 	}
@@ -120,7 +113,7 @@ func main() {
 
 	// Execute the root command
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Printf("Error executing command: %v\n", err)
+		log.WithError(err).Error("Error executing command")
 		os.Exit(1)
 	}
 }
