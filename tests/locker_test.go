@@ -15,17 +15,13 @@ func TestLocker_Acquire(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRedis := mocks.NewMockCmdable(ctrl)
-	logger := mocks.NewMockILogger(ctrl)
+	//logger := mocks.NewMockILogger(ctrl)
 	lockName := "cronlite:lock::test-lock"
 
 	ttl := 10 * time.Second
 	mockRedis.EXPECT().
 		SetNX(gomock.Any(), lockName, 1, ttl).
 		Return(redis.NewBoolResult(true, nil)).
-		Times(1)
-
-	logger.EXPECT().
-		Debug(gomock.Any(), "Acquiring lock", gomock.Any()).
 		Times(1)
 
 	l := locker.NewLocker(locker.Options{
@@ -45,18 +41,15 @@ func TestLocker_Acquire_AlreadyLocked(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRedis := mocks.NewMockCmdable(ctrl)
-	logger := mocks.NewMockILogger(ctrl)
 	lockName := "cronlite:lock::test-lock"
 
+	// Expect SetNX to be called and return false, indicating the lock is already held
 	mockRedis.EXPECT().
 		SetNX(gomock.Any(), lockName, 1, gomock.Any()).
 		Return(redis.NewBoolResult(false, nil)).
 		Times(1)
 
-	logger.EXPECT().
-		Debug(gomock.Any(), "Acquiring lock", gomock.Any()).
-		Times(1)
-
+	// Initialize the Locker with the mocked ILogger
 	l := locker.NewLocker(locker.Options{
 		Name:  "test-lock",
 		Redis: mockRedis,
@@ -73,18 +66,15 @@ func TestLocker_Release(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRedis := mocks.NewMockCmdable(ctrl)
-	logger := mocks.NewMockILogger(ctrl)
 	lockName := "cronlite:lock::test-lock"
 
+	// Expect Del to be called and return 1, indicating the lock was deleted
 	mockRedis.EXPECT().
 		Del(gomock.Any(), lockName).
 		Return(redis.NewIntResult(1, nil)).
 		Times(1)
 
-	logger.EXPECT().
-		Debug(gomock.Any(), "Released lock", gomock.Any()).
-		Times(1)
-
+	// Initialize the Locker with the mocked ILogger
 	l := locker.NewLocker(locker.Options{
 		Name:  "test-lock",
 		Redis: mockRedis,
@@ -101,19 +91,16 @@ func TestLocker_Extend(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockRedis := mocks.NewMockCmdable(ctrl)
-	logger := mocks.NewMockILogger(ctrl)
 	lockName := "cronlite:lock::test-lock"
 	ttl := 10 * time.Second
 
+	// Expect Expire to be called and return true, indicating the TTL was updated
 	mockRedis.EXPECT().
 		Expire(gomock.Any(), lockName, ttl).
 		Return(redis.NewBoolResult(true, nil)).
 		Times(1)
 
-	logger.EXPECT().
-		Debug(gomock.Any(), "Extended lock", gomock.Any()).
-		Times(1)
-
+	// Initialize the Locker with the mocked ILogger
 	l := locker.NewLocker(locker.Options{
 		Name:    "test-lock",
 		Redis:   mockRedis,

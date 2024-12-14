@@ -2,11 +2,12 @@ package logger
 
 import (
 	"context"
-	"os"
+	"fmt"
+	"path/filepath"
+	"runtime"
+	"time"
 
-	"github.com/go-logr/logr"
-	"github.com/go-logr/zerologr"
-	"github.com/rs/zerolog"
+	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -19,23 +20,27 @@ const (
 var logger ILogger
 
 // init initializes the logger configuration and sets up the global logger instance.
-// It configures the zerolog to use Unix milliseconds for time formatting and sets
-// the name field and separator for the zerologr logger. It also creates a new
-// zerolog logger that writes to standard error, includes caller information, and
-// timestamps each log entry. The logger instance is then wrapped in a logr.Logger
-// and assigned to the global logger variable.
+// It configures Logrus to use JSON formatting with custom timestamp formatting.
+// Caller reporting is disabled to allow manual capture of caller information.
+// The logger instance is then assigned to the global logger variable.
 func init() {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
-	zerologr.NameFieldName = "logger"
-	zerologr.NameSeparator = "/"
+	log := logrus.New()
 
-	zl := zerolog.New(os.Stderr)
-	zl = zl.With().Caller().Timestamp().Logger()
+	// Configure Logrus formatter with JSON format and custom timestamp
+	log.SetFormatter(&logrus.JSONFormatter{
+		TimestampFormat: time.RFC3339Nano,
+	})
 
-	zerologr.VerbosityFieldName = ""
-	ls := zerologr.NewLogSink(&zl)
-	loggerInstance := logr.New(ls)
-	logger = &Logger{&loggerInstance}
+	// Disable Logrus's built-in caller reporting
+	log.SetReportCaller(false)
+
+	// Set default log level
+	log.SetLevel(logrus.DebugLevel)
+
+	// Initialize the global logger with a base entry
+	logger = &Logger{
+		Entry: log.WithFields(logrus.Fields{}),
+	}
 }
 
 // Log returns a logger instance that is enriched with tracing information
@@ -62,181 +67,137 @@ func Log(ctx context.Context) ILogger {
 		if sc.IsValid() {
 			newLogger = newLogger.WithValues(
 				SpanIdLogKeyName, sc.SpanID().String(),
-				TraceIdLogKeyName, sc.TraceID().String())
+				TraceIdLogKeyName, sc.TraceID().String(),
+			)
 		}
 	}
 	return newLogger
 }
 
+// Logger implements the ILogger interface using Logrus.
 type Logger struct {
-	Logr *logr.Logger
+	Entry *logrus.Entry
 }
 
+// SetLevel sets the global logging level.
 func (l *Logger) SetLevel(level Level) {
-	zerolog.SetGlobalLevel(zerolog.Level(int(level)))
+	l.Entry.Logger.SetLevel(logrus.Level(level))
 }
 
 // Debug logs a message at the debug level with optional key-value pairs for additional context.
-//
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the debug level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
 func (l *Logger) Debug(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogDebugLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Debug(msg)
 }
 
 // Info logs a message at the info level with optional key-value pairs for additional context.
-//
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the info level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
 func (l *Logger) Info(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogInfoLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Info(msg)
 }
 
 // Warn logs a message at the warning level with optional key-value pairs for additional context.
-//
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the warning level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
 func (l *Logger) Warn(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogWarnLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Warn(msg)
 }
 
 // Error logs a message at the error level with optional key-value pairs for additional context.
-//
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the error level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
 func (l *Logger) Error(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogErrorLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Error(msg)
 }
 
 // Fatal logs a message at the fatal level with optional key-value pairs for additional context.
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the fatal level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
+// It then exits the application with status code 1.
 func (l *Logger) Fatal(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogFatalLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Fatal(msg)
 }
 
 // Panic logs a message at the panic level with optional key-value pairs for additional context.
-//
-// This method retrieves the current log sink and, if it supports call stack
-// helpers, invokes the helper to capture the call stack. It then logs the
-// provided message and key-value pairs at the panic level.
-//
-// Parameters:
-//
-//	msg - The message to be logged.
-//	keysAndValues - Optional key-value pairs that provide additional context
-//	                for the log entry. These are variadic and can be omitted.
-//
-// The function does not return any value.
+// It then panics with the provided message.
 func (l *Logger) Panic(msg string, keysAndValues ...interface{}) {
-	sink := l.Logr.GetSink()
-	if withHelper, ok := sink.(logr.CallStackHelperLogSink); ok {
-		withHelper.GetCallStackHelper()()
-	}
-	sink.Info(int(LogPanicLevel), msg, keysAndValues...)
+	fields := convertToFields(keysAndValues...)
+	callerInfo := getCallerInfo()
+	l.Entry.WithFields(fields).WithFields(logrus.Fields{
+		"caller": callerInfo,
+	}).Panic(msg)
 }
 
 // WithValues returns a new ILogger instance with additional context provided
 // by key-value pairs. These pairs are added to the logger's context, allowing
 // for more detailed and structured logging.
-//
-// Parameters:
-//
-//	keysAndValues - Variadic key-value pairs that provide additional context
-//	                for the log entry. These pairs are used to enrich the
-//	                logger's context and can be omitted if not needed.
-//
-// Returns:
-//
-//	ILogger - A new logger instance that includes the provided key-value pairs
-//	          in its context, enabling enhanced logging capabilities.
 func (l Logger) WithValues(keysAndValues ...interface{}) ILogger {
-	withValues := l.Logr.WithValues(keysAndValues...)
-	l.Logr = &withValues
-	return &l
+	fields := convertToFields(keysAndValues...)
+	newEntry := l.Entry.WithFields(fields)
+	return &Logger{Entry: newEntry}
 }
 
 // WithError returns a new ILogger instance with an error context added.
 // This method enriches the logger's context with the provided error,
 // allowing for more detailed and structured logging of error information.
-//
-// Parameters:
-//
-//	err - The error to be added to the logger's context. This error is
-//	      associated with the predefined ErrorKey, enabling consistent
-//	      error logging across the application.
-//
-// Returns:
-//
-//	ILogger - A new logger instance that includes the provided error in
-//	          its context, facilitating enhanced error traceability.
 func (l Logger) WithError(err error) ILogger {
-	withValues := l.Logr.WithValues(ErrorKey, err)
-	l.Logr = &withValues
-	return &l
+	newEntry := l.Entry.WithField(ErrorKey, err)
+	return &Logger{Entry: newEntry}
+}
+
+// convertToFields converts variadic key-value pairs into logrus.Fields.
+// It ensures that keys are strings and handles any mismatches gracefully.
+func convertToFields(keysAndValues ...interface{}) logrus.Fields {
+	fields := logrus.Fields{}
+	length := len(keysAndValues)
+	for i := 0; i < length-1; i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			key = fmt.Sprintf("invalid_key_%d", i)
+		}
+		fields[key] = keysAndValues[i+1]
+	}
+	// Handle odd number of arguments
+	if length%2 != 0 {
+		key, ok := keysAndValues[length-1].(string)
+		if !ok {
+			key = fmt.Sprintf("invalid_key_%d", length-1)
+		}
+		fields[key] = "MISSING_VALUE"
+	}
+	return fields
+}
+
+// getCallerInfo retrieves the file and function name of the caller outside the logger package.
+// It skips the frames related to the logger's internal methods.
+func getCallerInfo() string {
+	// Number of stack frames to skip to reach the actual caller
+	const skipFrames = 3
+	pc, file, line, ok := runtime.Caller(skipFrames)
+	if !ok {
+		return "unknown"
+	}
+
+	function := "unknown"
+	fn := runtime.FuncForPC(pc)
+	if fn != nil {
+		function = fn.Name()
+	}
+
+	// Shorten the file path to just the file name
+	shortFile := filepath.Base(file)
+
+	return fmt.Sprintf("%s:%d %s", shortFile, line, function)
 }

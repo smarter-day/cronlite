@@ -41,6 +41,20 @@ func (m *MockICronJob) EXPECT() *MockICronJobMockRecorder {
 	return m.recorder
 }
 
+// GetOptions mocks base method.
+func (m *MockICronJob) GetOptions() *cron.CronJobOptions {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOptions")
+	ret0, _ := ret[0].(*cron.CronJobOptions)
+	return ret0
+}
+
+// GetOptions indicates an expected call of GetOptions.
+func (mr *MockICronJobMockRecorder) GetOptions() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOptions", reflect.TypeOf((*MockICronJob)(nil).GetOptions))
+}
+
 // GetState mocks base method.
 func (m *MockICronJob) GetState() cron.IState {
 	m.ctrl.T.Helper()

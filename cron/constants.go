@@ -39,6 +39,7 @@ const (
 	MessageFailedToSaveJobStateAfterPostExecutionFunc = "Failed to save job state after post execution func"
 	MessageLockExtensionGoRoutineStopped              = "Lock extension goroutine stopped"
 	MessageFailedToExtendLock                         = "Failed to extend lock"
+	MessageFailedToReleaseLock                        = "Failed to release lock"
 	MessageLockExtended                               = "Lock extended"
 	MessageFailedToSaveJobStateAfterLockExtension     = "Failed to save job state after lock extension"
 	MessageFailedToLoadJobState                       = "Failed to load job state"

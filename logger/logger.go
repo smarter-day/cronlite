@@ -1,17 +1,11 @@
 package logger
 
-// Level defines log levels
-type Level int8
-
-// Log level constants according to zerologr implementation
-const (
-	LogPanicLevel = iota - 4
-	LogFatalLevel
-	LogErrorLevel
-	LogWarnLevel
-	LogInfoLevel
-	LogDebugLevel
+import (
+	"github.com/sirupsen/logrus"
 )
+
+// Level represents the logging level.
+type Level logrus.Level
 
 // ILogger represents a logging interface.
 type ILogger interface {

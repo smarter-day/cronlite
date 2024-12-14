@@ -16,6 +16,7 @@ type ICronJob interface {
 	Stop(ctx context.Context) error
 	GetState() IState
 	OnStateUpdated(ctx context.Context, state *CronJobState) error
+	GetOptions() *CronJobOptions
 }
 
 // CronJobOptions defines the options for creating a new cron job.
@@ -363,6 +364,13 @@ func (cj *CronJob) extendLockPeriodically(ctx context.Context, state *CronJobSta
 
 	log := cj.getLogger(ctx).WithValues("state", state)
 
+	// Release lock when the function exits
+	defer func() {
+		if err := cj.Options.Locker.Release(ctx); err != nil {
+			log.WithError(err).Error(MessageFailedToReleaseLock)
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -505,7 +513,6 @@ func (cj *CronJob) Start(ctx context.Context) error {
 		tickerPeriod := time.Second
 		ticker := time.NewTicker(tickerPeriod)
 		defer ticker.Stop()
-		defer cj.isRunningMutex.Unlock()
 
 		cj.isRunningMutex.Lock()
 		cj.isRunning = false
@@ -535,8 +542,7 @@ func (cj *CronJob) Start(ctx context.Context) error {
 				// Check if it's too early to run the job
 				now := time.Now()
 				if now.Before(state.NextRun) {
-					log.WithValues("next_run", state.NextRun, "current", now).
-						Debug(MessageJobTooEarlyToRun)
+					log.Debug(MessageJobTooEarlyToRun)
 					// Calculate sleep time until next run
 					// If it is more than ticker, sleep until next run and continue to next cycle
 					// Otherwise don't sleep and just let the locker try to acquire
@@ -552,8 +558,7 @@ func (cj *CronJob) Start(ctx context.Context) error {
 				if err != nil || !success {
 					log.WithError(err).Debug(MessageFailedToAcquireLock)
 					if now.After(state.NextRun.Add(time.Second)) {
-						log.WithValues("next_run", state.NextRun, "current", now).
-							Debug(MessageJobTakenByOtherWorkers)
+						log.Debug(MessageJobTakenByOtherWorkers)
 						cj.sleepUntilNextRun()
 					}
 					continue
@@ -650,4 +655,8 @@ func (cj *CronJob) onStopSignal(ctx context.Context, state *CronJobState) {
 	} else {
 		log.Debug(MessageJobStoppedBySignalWithoutActiveExecution)
 	}
+}
+
+func (cj *CronJob) GetOptions() *CronJobOptions {
+	return &cj.Options
 }

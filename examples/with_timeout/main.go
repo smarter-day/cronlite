@@ -20,6 +20,7 @@ func main() {
 
 	// Set up signal capturing to handle graceful shutdown
 	helpers.SetupTerminationSignalHandler(cancel)
+	log := logger.Log(ctx)
 
 	// Define the root command using Cobra
 	var rootCmd = &cobra.Command{
@@ -55,20 +56,20 @@ func main() {
 			}()
 
 			// Initialize the logger
-			appLogger, err := logger.NewDynamicLogger("logrus", "debug")
+
 			if err != nil {
 				fmt.Printf("Failed to initialize logger: %v\n", err)
 				return
 			}
 
 			// Define the cron job function
-			jobFunction := func(ctx context.Context, job *cron.CronJob) error {
-				appLogger.Info(ctx, "Executing cron job: Performing a scheduled task.", nil)
+			jobFunction := func(ctx context.Context, job cron.ICronJob) error {
+				log.Info("Executing cron job: Performing a scheduled task.")
 
 				// Simulate a task taking some time
 				time.Sleep(8 * time.Second)
 
-				appLogger.Info(ctx, "CronJob job completed successfully.", nil)
+				log.Info("CronJob job completed successfully.")
 				return nil // Return nil to indicate success
 			}
 
@@ -78,23 +79,24 @@ func main() {
 				Name:        jobName,           // Unique name for the cron job
 				Spec:        "*/5 * * * * * *", // CronJob schedule: every 5 seconds
 				ExecuteFunc: jobFunction,       // The job function to execute
-				Logger:      appLogger,         // Logger for logging job activities
 			}
 
 			// Create a new cron job instance
 			cronJob, err := cron.NewCronJob(jobOptions)
 			if err != nil {
-				appLogger.Error(ctx, "Failed to create cron job.", map[string]interface{}{"error": err})
+				log.WithValues("error", err).
+					Error("Failed to create cron job.")
 				return
 			}
 
 			// Start the cron job
 			if err := cronJob.Start(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to start cron job.", map[string]interface{}{"error": err})
+				log.WithValues("error", err).
+					Error("Failed to start cron job.")
 				return
 			}
 
-			appLogger.Info(ctx, "CronJob job started successfully.", nil)
+			log.Info("CronJob job started successfully.")
 
 			// Create a context with a timeout of 1 minute
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 1*time.Minute)
@@ -104,7 +106,7 @@ func main() {
 			select {
 			case <-timeoutCtx.Done():
 				if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
-					appLogger.Info(ctx, "Timeout reached. Initiating shutdown...", nil)
+					log.Info("Timeout reached. Initiating shutdown...")
 					cancel() // Cancel the parent context to initiate shutdown
 				}
 			case <-ctx.Done():
@@ -113,9 +115,10 @@ func main() {
 
 			// Stop the cron job gracefully
 			if err := cronJob.Stop(ctx); err != nil {
-				appLogger.Error(ctx, "Failed to stop cron job gracefully.", map[string]interface{}{"error": err})
+				log.WithValues("error", err).
+					Error("Failed to stop cron job gracefully.")
 			} else {
-				appLogger.Info(ctx, "CronJob job stopped gracefully.", nil)
+				log.Info("CronJob job stopped gracefully.")
 			}
 		},
 	}
@@ -129,7 +132,7 @@ func main() {
 
 	// Execute the root command
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Printf("Error executing command: %v\n", err)
+		log.WithError(err).Error("Error executing command")
 		os.Exit(1)
 	}
 }

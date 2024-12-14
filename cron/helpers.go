@@ -131,3 +131,22 @@ func ListJobsByRecencyWithState(ctx context.Context, redisClient *redis.Client, 
 	}
 	return jobsWithState, nil
 }
+
+// SerializeJobState serializes the CronJobState to JSON.
+func SerializeJobState(state *CronJobState) (string, error) {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// DeserializeJobState deserializes JSON data into a CronJobState.
+func DeserializeJobState(data string) (*CronJobState, error) {
+	var state CronJobState
+	err := json.Unmarshal([]byte(data), &state)
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
