@@ -505,7 +505,7 @@ func (cj *CronJob) Start(ctx context.Context) error {
 		}
 		if !shouldContinue {
 			log.Debug(MessageStoppingJobDueToBeforeStartFunc)
-			return nil
+			return cj.Stop(ctx)
 		}
 	}
 
