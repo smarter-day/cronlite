@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/redis/go-redis/v9"
+	"time"
 )
 
 // LoadJobStateFromRedis retrieves the job state from Redis using the provided state key.
@@ -149,4 +150,23 @@ func DeserializeJobState(data string) (*CronJobState, error) {
 		return nil, err
 	}
 	return &state, nil
+}
+
+// GetJobStatus determines the current status of a job based on its state.
+//
+// Parameters:
+//
+//	state - The CronJobState containing the job's current status, next run time, and last update time.
+//
+// Returns:
+//
+//	A string representing the job's status. If the job is running and its next run time is in the past
+//	and it hasn't been updated recently, the status is considered "Stale". Otherwise, it returns the
+//	current status from the CronJobState.
+func GetJobStatus(state CronJobState) string {
+	status := string(state.Status)
+	if state.NextRun.Before(time.Now()) && time.Now().Add(-staleDuration).After(state.UpdatedAt) && status == string(JobStatusRunning) {
+		status = string(JobStatusStale)
+	}
+	return status
 }

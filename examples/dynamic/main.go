@@ -84,7 +84,7 @@ func main() {
 				randomInt := rand.Intn(50) + 10
 
 				// Update the cron job's Spec
-				state.Spec = fmt.Sprintf("*/%d * * * * * *", randomInt)
+				state.Spec = fmt.Sprintf("*/%d * * * * *", randomInt)
 				err = job.GetState().Save(ctx, state)
 				if err != nil {
 					log.WithError(err).Error("Failed to save updated job state")
@@ -97,11 +97,11 @@ func main() {
 
 			// Define the cron job options
 			jobOptions := cron.CronJobOptions{
-				Redis:            redisClient,       // Redis client for state management and locking
-				Name:             jobName,           // Unique name for the cron job
-				Spec:             "*/5 * * * * * *", // CronJob initial schedule: every 5 seconds
-				ExecuteFunc:      jobFunction,       // The job function to execute
-				AfterExecuteFunc: afterExecute,      // BeforeExecuteFunc hook for conditional execution
+				Redis:            redisClient,     // Redis client for state management and locking
+				Name:             jobName,         // Unique name for the cron job
+				Spec:             "*/5 * * * * *", // CronJob initial schedule: every 5 seconds
+				ExecuteFunc:      jobFunction,     // The job function to execute
+				AfterExecuteFunc: afterExecute,    // BeforeExecuteFunc hook for conditional execution
 			}
 
 			// Create a new cron job instance

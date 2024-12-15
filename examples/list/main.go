@@ -71,7 +71,7 @@ func main() {
 						strconv.Itoa(i + 1),
 						job.JobName,
 						job.State.Spec,
-						string(job.State.Status),
+						cron.GetJobStatus(job.State),
 						formatRunningBy(job.State.RunningBy),
 						lastRunStr,
 						nextRunStr,

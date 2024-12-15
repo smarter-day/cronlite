@@ -63,7 +63,7 @@ func main() {
 				log.Info("Executing cron job: Performing a scheduled task")
 
 				// Simulate a task taking some time
-				time.Sleep(2 * time.Second)
+				time.Sleep(30 * time.Second)
 
 				log.Info("Cron job completed successfully")
 				return nil // Return nil to indicate success
@@ -71,10 +71,10 @@ func main() {
 
 			// Define the cron job options
 			jobOptions := cron.CronJobOptions{
-				Redis:       redisClient,        // Redis client for state management and locking
-				Name:        jobName,            // Unique name for the cron job
-				Spec:        "*/15 * * * * * *", // CronJob schedule: every 5 seconds
-				ExecuteFunc: jobFunction,        // The job function to execute
+				Redis:       redisClient,      // Redis client for state management and locking
+				Name:        jobName,          // Unique name for the cron job
+				Spec:        "*/10 * * * * *", // CronJob schedule: every 5 seconds
+				ExecuteFunc: jobFunction,      // The job function to execute
 			}
 
 			// Create a new cron job instance

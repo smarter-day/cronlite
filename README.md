@@ -275,7 +275,7 @@ Very short code example:
 // Define BeforeStartFunc to change the job's Spec before starting
  beforeStart := func(ctx context.Context, job cronlite.ICronJob) (bool, error) {
      // New Spec: Run every 10 seconds
-     newSpec := "*/10 * * * * * *"
+     newSpec := "*/10 * * * * *"
      state, err := job.GetState().Get(ctx, false)
      if err != nil {
          fmt.Printf("Failed to get job state: %v\n", err)
@@ -298,7 +298,7 @@ Very short code example:
 options := cronlite.CronJobOptions{
    Redis:            redisClient,
    Name:             "hello-world-job",
-   Spec:             "*/5 * * * * * *", // Initial Spec: every 5 seconds
+   Spec:             "*/5 * * * * *", // Initial Spec: every 5 seconds
    ExecuteFunc:      jobFunction,
    BeforeStartFunc:  beforeStart,
 }
@@ -376,8 +376,8 @@ $ go run examples/list/main.go 10 --detailed
 +---+----------------------------+------------------+---------+---------------+---------------------------+---------------------------+------------+---------------------------+---------------------------+
 | # |        CRONJOB NAME        |       SPEC       | STATUS  |  RUNNING BY   |         LAST RUN          |         NEXT RUN          | ITERATIONS |        CREATED AT         |        UPDATED AT         |
 +---+----------------------------+------------------+---------+---------------+---------------------------+---------------------------+------------+---------------------------+---------------------------+
-| 1 | cronlite:job:state:test1   | */15 * * * * * * | Success | 32da0...b32ee | 2024-12-15T11:05:01+02:00 | 2024-12-15T11:05:15+02:00 |       5750 | 2024-12-13T19:21:55+02:00 | 2024-12-15T11:05:03+02:00 |
-| 2 | cronlite:job:state:dynamic | */34 * * * * * * | Success | f0c2b...a1831 | 2024-12-15T05:01:52+02:00 | 2024-12-15T05:02:00+02:00 |       4514 | 2024-12-13T18:06:21+02:00 | 2024-12-15T05:02:00+02:00 |
+| 1 | cronlite:job:state:test1   | */15 * * * * * | Success | 32da0...b32ee | 2024-12-15T11:05:01+02:00 | 2024-12-15T11:05:15+02:00 |       5750 | 2024-12-13T19:21:55+02:00 | 2024-12-15T11:05:03+02:00 |
+| 2 | cronlite:job:state:dynamic | */34 * * * * * | Success | f0c2b...a1831 | 2024-12-15T05:01:52+02:00 | 2024-12-15T05:02:00+02:00 |       4514 | 2024-12-13T18:06:21+02:00 | 2024-12-15T05:02:00+02:00 |
 +---+----------------------------+------------------+---------+---------------+---------------------------+---------------------------+------------+---------------------------+---------------------------+
 ```
 

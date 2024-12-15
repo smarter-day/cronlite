@@ -30,11 +30,11 @@ package tests
 //
 //	// Define test variables
 //	jobName := "test-job-execution-func-failure"
-//	expression := "* * * * * * *" // Every second for quick testing
+//	expression := "* * * * * *" // Every second for quick testing
 //	now := time.Now()
 //
 //	// Calculate the expected next run time based on the test's 'now'
-//	parsedExpr, err := cronexpr.Parse(expression)
+//	parsedExpr, err := cron.SpecParser.Parse(expression)
 //	if err != nil {
 //		t.Fatalf("failed to parse cron expression: %v", err)
 //	}

@@ -90,14 +90,10 @@ func (l *Locker) Release(ctx context.Context) error {
 	if l.options.Redis == nil {
 		return ErrRedisUnavailable
 	}
-
-	log := logger.Log(ctx).WithValues("name", l.options.Name)
 	err := l.options.Redis.Del(ctx, l.getLockName()).Err()
 	if err != nil {
-		log.WithError(err).Error("Failed to release lock")
 		return ErrLockReleaseFailed
 	}
-	log.Debug("Released lock")
 	return nil
 }
 

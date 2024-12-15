@@ -29,7 +29,7 @@ package tests
 //	now := time.Now()
 //
 //	// Calculate the expected next run time based on the test's 'now'
-//	parsedExpr, err := cronexpr.Parse(expression)
+//	parsedExpr, err := cron.SpecParser.Parse(expression)
 //	if err != nil {
 //		t.Fatalf("failed to parse cron expression: %v", err)
 //	}
@@ -192,10 +192,10 @@ package tests
 //	mockPipeline := mocks.NewMockPipeliner(ctrl)
 //
 //	jobName := "test-job-context-cancellation"
-//	expression := "*/2 * * * * * *" // Every 2 seconds for testing
+//	expression := "*/2 * * * * *" // Every 2 seconds for testing
 //	now := time.Now()
 //
-//	parsedExpr, err := cronexpr.Parse(expression)
+//	parsedExpr, err := cron.SpecParser.Parse(expression)
 //	if err != nil {
 //		t.Fatalf("failed to parse cron expression: %v", err)
 //	}

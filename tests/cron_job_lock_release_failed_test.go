@@ -10,7 +10,6 @@ import (
 	"cronlite/cron"
 	"cronlite/mocks"
 
-	"github.com/gorhill/cronexpr"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/mock/gomock"
 )
@@ -30,11 +29,11 @@ func TestCronJob_Execution_LockReleaseFailure(t *testing.T) {
 
 	// Define test variables
 	jobName := "test-job-execution-lock-release-failure"
-	expression := "* * * * * * *" // Every second for quick testing
+	expression := "* * * * * *" // Every second for quick testing
 	now := time.Now()
 
 	// Calculate the expected next run time based on the test's 'now'
-	parsedExpr, err := cronexpr.Parse(expression)
+	parsedExpr, err := cron.SpecParser.Parse(expression)
 	if err != nil {
 		t.Fatalf("failed to parse cron expression: %v", err)
 	}

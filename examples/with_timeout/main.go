@@ -75,10 +75,10 @@ func main() {
 
 			// Define the cron job options
 			jobOptions := cron.CronJobOptions{
-				Redis:       redisClient,       // Redis client for state management and locking
-				Name:        jobName,           // Unique name for the cron job
-				Spec:        "*/5 * * * * * *", // CronJob schedule: every 5 seconds
-				ExecuteFunc: jobFunction,       // The job function to execute
+				Redis:       redisClient,     // Redis client for state management and locking
+				Name:        jobName,         // Unique name for the cron job
+				Spec:        "*/5 * * * * *", // CronJob schedule: every 5 seconds
+				ExecuteFunc: jobFunction,     // The job function to execute
 			}
 
 			// Create a new cron job instance

@@ -5,10 +5,23 @@ import (
 	"cronlite/locker"
 	"cronlite/logger"
 	"fmt"
-	"github.com/gorhill/cronexpr"
 	"github.com/redis/go-redis/v9"
+	cronParser "github.com/robfig/cron/v3"
 	"sync"
 	"time"
+)
+
+var (
+	SpecParser = cronParser.NewParser(
+		cronParser.Second |
+			cronParser.Minute |
+			cronParser.Hour |
+			cronParser.Dom |
+			cronParser.Month |
+			cronParser.Dow |
+			cronParser.Descriptor,
+	)
+	staleDuration = 10 * time.Second
 )
 
 type ICronJob interface {
@@ -47,7 +60,7 @@ type CronJobOptions struct {
 
 type CronJob struct {
 	Options        CronJobOptions
-	Expression     *cronexpr.Expression
+	Scheduler      cronParser.Schedule
 	StopSignal     chan bool
 	State          IState
 	isRunning      bool
@@ -78,10 +91,6 @@ func NewCronJob(options CronJobOptions) (ICronJob, error) {
 	if options.Spec == "" {
 		return nil, ErrCronExpressionRequired
 	}
-	expr, err := cronexpr.Parse(options.Spec)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression: %w", err)
-	}
 
 	if options.ExecuteFunc == nil {
 		return nil, ErrCronFunctionRequired
@@ -91,29 +100,63 @@ func NewCronJob(options CronJobOptions) (ICronJob, error) {
 		options.WorkerIdProvider = &DefaultWorkerIDProvider{}
 	}
 
-	if options.Locker == nil {
-		lockerOptions := locker.Options{
-			Name:    options.Name,
-			Redis:   options.Redis,
-			LockTTL: time.Until(expr.Next(time.Now())) + 5*time.Second,
-		}
-		options.Locker = locker.NewLocker(lockerOptions)
-	}
-
-	cron := &CronJob{
+	stateKey := fmt.Sprintf(JobStateKeyFormat, options.Name)
+	cronJob := &CronJob{
 		Options:    options,
-		Expression: expr,
 		StopSignal: make(chan bool),
 	}
 
-	stateKey := fmt.Sprintf(JobStateKeyFormat, options.Name)
-	cron.State = NewState(
+	// Initialize the scheduler
+	if err := cronJob.initScheduler(context.Background(), options.Spec); err != nil {
+		return nil, err
+	}
+
+	// Initialize the locker
+	cronJob.initLocker()
+
+	// Initialize the state
+	cronJob.State = NewState(
 		options.Redis,
 		stateKey,
-		cron.OnStateUpdated,
+		cronJob.OnStateUpdated,
 	)
 
-	return cron, nil
+	return cronJob, nil
+}
+
+// initScheduler initializes the scheduler for the cron job based on the provided spec.
+// Returns an error if the spec is invalid.
+func (cj *CronJob) initScheduler(ctx context.Context, spec string) error {
+	scheduler := cj.getSchedulerBySpec(ctx, spec)
+	if scheduler == nil {
+		return fmt.Errorf("failed to parse cron spec: %s", spec)
+	}
+	cj.Scheduler = scheduler
+	return nil
+}
+
+// initLocker initializes the locker for the cron job.
+func (cj *CronJob) initLocker() {
+	if cj.Options.Locker == nil {
+		ttl := time.Until(cj.Scheduler.Next(time.Now().Add(time.Second)))
+		if ttl < time.Second {
+			ttl = time.Second
+		}
+		cj.Options.Locker = locker.NewLocker(locker.Options{
+			Name:    cj.Options.Name,
+			Redis:   cj.Options.Redis,
+			LockTTL: ttl,
+		})
+	}
+}
+
+func (cj *CronJob) getSchedulerBySpec(ctx context.Context, spec string) cronParser.Schedule {
+	scheduler, err := SpecParser.Parse(spec)
+	if err != nil {
+		logger.Log(ctx).WithError(err).Error("failed to parse cron spec: %w", spec)
+		return nil
+	}
+	return scheduler
 }
 
 // OnStateUpdated handles updates to the cron job's state.
@@ -163,24 +206,27 @@ func (cj *CronJob) onSpecUpdated(ctx context.Context, newState *CronJobState) er
 	log.WithValues("new_spec", newState.Spec, "old_spec", cj.Options.Spec).
 		Debug(MessageUpdatingCronExpression)
 
-	expr, err := cronexpr.Parse(newState.Spec)
-	if err != nil {
-		log.WithError(err).Error(ErrMessageInvalidCronExpression)
-		return err
+	scheduler := cj.getSchedulerBySpec(ctx, newState.Spec)
+	if scheduler == nil {
+		return fmt.Errorf("failed to parse new cron spec: %s", newState.Spec)
 	}
 
-	cj.Expression = expr
+	cj.Scheduler = scheduler
 	cj.Options.Spec = newState.Spec
-	cj.Options.Locker.SetTTL(time.Until(cj.Expression.Next(time.Now())))
+	ttl := time.Until(scheduler.Next(time.Now()))
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	cj.Options.Locker.SetTTL(ttl)
 
 	if newState.LastRun.IsZero() {
 		newState.LastRun = time.Now()
 		log.Debug(MessageInitializingLastRunToCurrentTime)
 	}
-	newState.NextRun = cj.Expression.Next(newState.LastRun)
+	newState.NextRun = cj.Scheduler.Next(newState.LastRun)
 	log.WithValues("next_run", newState.NextRun).
 		Debug(MessageRecalculatedNextRunFromNewSpec)
-	return err
+	return nil
 }
 
 // Stop halts the execution of the cron job by closing the StopSignal channel.
@@ -246,6 +292,16 @@ func (cj *CronJob) onBeforeExecute(ctx context.Context, state *CronJobState) (bo
 //   - state: *CronJobState
 //     The current state of the cron job, which will be updated throughout the execution process.
 func (cj *CronJob) execute(ctx context.Context, state *CronJobState) {
+	cj.isRunningMutex.Lock()
+	cj.isRunning = true
+	cj.isRunningMutex.Unlock()
+
+	defer func() {
+		cj.isRunningMutex.Lock()
+		cj.isRunning = false
+		cj.isRunningMutex.Unlock()
+	}()
+
 	log := cj.getLogger(ctx).WithValues("state", state)
 
 	// Execute BeforeExecuteFunc hook
@@ -274,7 +330,7 @@ func (cj *CronJob) execute(ctx context.Context, state *CronJobState) {
 	} else {
 		now := time.Now()
 		state.LastRun = now
-		state.NextRun = cj.Expression.Next(now)
+		state.NextRun = cj.Scheduler.Next(now)
 		state.Status = JobStatusRunning
 		log = log.WithValues("state", state)
 	}
@@ -349,26 +405,25 @@ func (cj *CronJob) execute(ctx context.Context, state *CronJobState) {
 func (cj *CronJob) extendLockPeriodically(ctx context.Context, state *CronJobState) {
 	ttl := cj.Options.Locker.GetLockTTL()
 
-	var extensionInterval time.Duration
-	if ttl < 20*time.Second {
-		extensionInterval = ttl / 2
-		if ttl < 1*time.Second {
-			extensionInterval = 1 * time.Second
-		}
-	} else {
-		extensionInterval = 10 * time.Second
+	if ttl < time.Second {
+		ttl = 1 * time.Second
+	} else if ttl > staleDuration {
+		ttl = staleDuration
 	}
+
+	// Set extension interval to 80% of TTL to ensure timely extensions.
+	extensionInterval := time.Duration(float64(ttl) * 0.8)
+
+	// Ensure a minimum extension interval to avoid very short intervals.
 
 	ticker := time.NewTicker(extensionInterval)
 	defer ticker.Stop()
 
 	log := cj.getLogger(ctx).WithValues("state", state)
 
-	// Release lock when the function exits
+	// Ensure the lock is released when the function exits.
 	defer func() {
-		if err := cj.Options.Locker.Release(ctx); err != nil {
-			log.WithError(err).Error(MessageFailedToReleaseLock)
-		}
+		_ = cj.Options.Locker.Release(ctx)
 	}()
 
 	for {
@@ -452,6 +507,39 @@ func (cj *CronJob) getLogger(ctx context.Context) logger.ILogger {
 	return logger.Log(ctx).WithValues("name", cj.Options.Name, "worker_id", workerId)
 }
 
+func (cj *CronJob) getState(ctx context.Context, force bool) (*CronJobState, error) {
+	// Load initial state
+	state, err := cj.State.Get(ctx, force)
+	log := cj.getLogger(ctx).WithValues("state", state)
+	if err != nil {
+		log.WithError(err).Error(MessageFailedToLoadJobState)
+		return nil, err
+	}
+
+	// If state is nil, initialize a default state
+	if state == nil {
+		state = &CronJobState{
+			Status:     JobStatusNotRunning,
+			LastRun:    time.Time{},
+			Spec:       cj.Options.Spec,
+			NextRun:    cj.Scheduler.Next(time.Now()),
+			Iterations: 0,                            // Initially 0 iterations
+			Data:       make(map[string]interface{}), // Initialize as empty map
+			UpdatedAt:  time.Now(),
+			CreatedAt:  time.Now(),
+		}
+		log = log.WithValues("state", state)
+
+		// Save the default state
+		if saveErr := cj.State.Save(ctx, state); saveErr != nil {
+			log = log.WithValues("state", state)
+			log.WithError(saveErr).Error(MessageFailedToSaveDefaultJobState)
+			return state, saveErr
+		}
+	}
+	return state, nil
+}
+
 // Start initiates the execution of the cron job, managing its lifecycle and state.
 //
 // This function loads the initial state of the cron job, initializes it if necessary,
@@ -465,40 +553,17 @@ func (cj *CronJob) getLogger(ctx context.Context) logger.ILogger {
 // Returns:
 //   - error: An error if the initial state loading or saving fails, or if the pre-start hook returns an error.
 func (cj *CronJob) Start(ctx context.Context) error {
-	// Load initial state
-	state, err := cj.State.Get(ctx, true)
-	log := cj.getLogger(ctx).WithValues("state", state)
+	log := cj.getLogger(ctx)
+	state, err := cj.getState(ctx, true)
 	if err != nil {
 		log.WithError(err).Error(MessageFailedToLoadJobState)
 		return err
 	}
+	log = log.WithValues("state", state)
 
-	// If state is nil, initialize a default state
-	if state == nil {
-		state = &CronJobState{
-			Status:     JobStatusNotRunning,
-			LastRun:    time.Time{},
-			Spec:       cj.Options.Spec,
-			NextRun:    cj.Expression.Next(time.Now()),
-			Iterations: 0,                            // Initially 0 iterations
-			Data:       make(map[string]interface{}), // Initialize as empty map
-			UpdatedAt:  time.Now(),
-			CreatedAt:  time.Now(),
-		}
-		log = log.WithValues("state", state)
-
-		// Save the default state
-		if saveErr := cj.State.Save(ctx, state); saveErr != nil {
-			log = log.WithValues("state", state)
-			log.WithError(saveErr).Error(MessageFailedToSaveDefaultJobState)
-			return saveErr
-		}
-	}
-
-	// Call BeforeStartFunc if defined
+	// Execute BeforeStartFunc if defined.
 	if cj.Options.BeforeStartFunc != nil {
 		shouldContinue, err := cj.Options.BeforeStartFunc(ctx, cj)
-		log = log.WithValues("state", state)
 		if err != nil {
 			log.WithError(err).Error(MessageFailedToExecuteBeforeStartFunc)
 			return err
@@ -510,50 +575,36 @@ func (cj *CronJob) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		tickerPeriod := time.Second
-		ticker := time.NewTicker(tickerPeriod)
-		defer ticker.Stop()
+		defer func(cj *CronJob, ctx context.Context) {
+			err := cj.Stop(ctx)
+			if err != nil {
+				log.WithError(err).Error("Failed to stop job after context cancellation.")
+			}
+		}(cj, ctx)
 
-		cj.isRunningMutex.Lock()
-		cj.isRunning = false
-		cj.isRunningMutex.Unlock()
 		for {
+			// Calculate time until next run.
+			now := time.Now()
+			nextRun := cj.Scheduler.Next(now)
+			sleepDuration := time.Until(nextRun)
+			if sleepDuration <= 0 {
+				sleepDuration = 1 * time.Second // Minimal sleep to prevent tight loop.
+			}
+
+			log.WithValues("next_run", nextRun).Debug("Sleeping until next run.")
+			timer := time.NewTimer(sleepDuration)
+
 			select {
 			case <-ctx.Done():
 				cj.onContextDone(ctx, state)
+				timer.Stop()
 				return
 			case <-cj.StopSignal:
 				cj.onStopSignal(ctx, state)
+				timer.Stop()
 				return
-			case <-ticker.C:
-				// Load fresh state
-				state, err = cj.State.Get(ctx, true)
-				log = log.WithValues("state", state)
-				if err != nil {
-					log.WithError(err).Error(MessageFailedToLoadJobState)
-					continue
-				}
-
-				// Job is still running but too long since last update? It is considered stale.
-				if state.Status == JobStatusRunning && time.Since(state.UpdatedAt) > StaleThreshold {
-					log.Warn(MessageJobIsStale)
-				}
-
-				// Check if it's too early to run the job
-				now := time.Now()
-				if now.Before(state.NextRun) {
-					log.Debug(MessageJobTooEarlyToRun)
-					// Calculate sleep time until next run
-					// If it is more than ticker, sleep until next run and continue to next cycle
-					// Otherwise don't sleep and just let the locker try to acquire
-					if tickerPeriod < time.Until(state.NextRun) {
-						time.Sleep(time.Until(state.NextRun))
-						continue
-					}
-				}
-
-				// Acquire lock to execute the job
-				now = time.Now() // <- get new now before acquiring lock (which can be slow)
+			case <-timer.C:
+				// Attempt to acquire the lock.
 				success, err := cj.Options.Locker.Acquire(ctx)
 				if err != nil || !success {
 					log.WithError(err).Debug(MessageFailedToAcquireLock)
@@ -564,14 +615,8 @@ func (cj *CronJob) Start(ctx context.Context) error {
 					continue
 				}
 
-				cj.isRunningMutex.Lock()
-				cj.isRunning = true
-				cj.isRunningMutex.Unlock()
+				// Execute the job.
 				cj.execute(ctx, state)
-				cj.isRunningMutex.Lock()
-				cj.isRunning = false
-				cj.isRunningMutex.Unlock()
-				cj.sleepUntilNextRun()
 			}
 		}
 	}()
@@ -584,8 +629,8 @@ func (cj *CronJob) Start(ctx context.Context) error {
 // of the cron job. If the next run time is in the past, it defaults to a minimal sleep duration.
 func (cj *CronJob) sleepUntilNextRun() {
 	now := time.Now()
-	nextRun := cj.Expression.Next(now)
-	sleepDuration := time.Until(nextRun) + 1*time.Second
+	nextRun := cj.Scheduler.Next(now)
+	sleepDuration := time.Until(nextRun)
 	if sleepDuration > 0 {
 		time.Sleep(sleepDuration)
 	} else {

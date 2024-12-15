@@ -18,6 +18,7 @@ const (
 
 	JobStatusNotRunning               = ""
 	JobStatusRunning    CronJobStatus = "Running"
+	JobStatusStale      CronJobStatus = "Stale"
 	JobStatusCancelled  CronJobStatus = "Cancelled"
 	JobStatusFailed     CronJobStatus = "Failed"
 	JobStatusSuccess    CronJobStatus = "Success"
@@ -39,15 +40,12 @@ const (
 	MessageFailedToSaveJobStateAfterPostExecutionFunc = "Failed to save job state after post execution func"
 	MessageLockExtensionGoRoutineStopped              = "Lock extension goroutine stopped"
 	MessageFailedToExtendLock                         = "Failed to extend lock"
-	MessageFailedToReleaseLock                        = "Failed to release lock"
 	MessageLockExtended                               = "Lock extended"
 	MessageFailedToSaveJobStateAfterLockExtension     = "Failed to save job state after lock extension"
 	MessageFailedToLoadJobState                       = "Failed to load job state"
 	MessageFailedToSaveDefaultJobState                = "Failed to save default job state"
 	MessageFailedToExecuteBeforeStartFunc             = "Failed to execute BeforeStartFunc"
 	MessageStoppingJobDueToBeforeStartFunc            = "BeforeStartFunc callback returned false, stopping job"
-	MessageJobIsStale                                 = "Job is stale"
-	MessageJobTooEarlyToRun                           = "Job is too early to run"
 	MessageFailedToAcquireLock                        = "Failed to acquire lock"
 	MessageJobTakenByOtherWorkers                     = "Job is too late to run when lock is acquired. Sleeping until next run"
 	MessageFailedToSaveJobState                       = "Failed to save job state"
@@ -55,8 +53,6 @@ const (
 	MessageJobStoppedByContextWithoutActiveExecution  = "CronJob job stopped by context without active execution"
 	MessageJobStoppedBySignalDuringActiveExecution    = "CronJob job stopped by StopSignal with active execution"
 	MessageJobStoppedBySignalWithoutActiveExecution   = "CronJob job stopped by StopSignal without active execution"
-
-	ErrMessageInvalidCronExpression = "Invalid cron expression"
 )
 
 var (

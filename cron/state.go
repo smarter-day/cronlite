@@ -63,6 +63,10 @@ func (sm *State) Save(ctx context.Context, state *CronJobState) error {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
+	if sm.currentState.LastRun.After(state.LastRun) {
+		return errors.New("cannot save not actual state")
+	}
+
 	state.UpdatedAt = time.Now()
 	sm.currentState = state
 
