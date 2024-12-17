@@ -10,7 +10,7 @@
 package mocks
 
 import (
-	logger "cronlite/logger"
+	logger "github.com/smarter-day/logger"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"

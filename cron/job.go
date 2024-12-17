@@ -3,10 +3,10 @@ package cron
 import (
 	"context"
 	"cronlite/locker"
-	"cronlite/logger"
 	"fmt"
 	"github.com/redis/go-redis/v9"
 	cronParser "github.com/robfig/cron/v3"
+	"github.com/smarter-day/logger"
 	"sync"
 	"time"
 )

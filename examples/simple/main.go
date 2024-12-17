@@ -9,7 +9,7 @@ import (
 
 	// Import the cronlite packages
 	"cronlite/cron"
-	"cronlite/logger"
+	"github.com/smarter-day/logger"
 
 	// Import Cobra packages
 	"github.com/spf13/cobra"

@@ -2,9 +2,9 @@ package helpers
 
 import (
 	"context"
-	"cronlite/logger"
 	"fmt"
 	"github.com/redis/go-redis/v9"
+	"github.com/smarter-day/logger"
 	"os"
 	"os/signal"
 	"syscall"

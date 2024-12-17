@@ -2,9 +2,9 @@ package locker
 
 import (
 	"context"
-	"cronlite/logger"
 	"errors"
 	"fmt"
+	"github.com/smarter-day/logger"
 	"sync"
 	"time"
 
