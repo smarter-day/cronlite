@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"cronlite/helpers"
+	"errors"
 	"github.com/redis/go-redis/v9"
+	"math/rand"
 	"os"
 	"time"
 
@@ -63,7 +65,13 @@ func main() {
 				log.Info("Executing cron job: Performing a scheduled task")
 
 				// Simulate a task taking some time
-				time.Sleep(30 * time.Second)
+				randomSleep := time.Duration(rand.Intn(30)) * time.Second
+				time.Sleep(randomSleep)
+
+				randomError := rand.Intn(10) == 0
+				if randomError {
+					return errors.New("simulated error during job execution")
+				}
 
 				log.Info("Cron job completed successfully")
 				return nil // Return nil to indicate success
