@@ -14,8 +14,52 @@ import (
 	cron "cronlite/cron"
 	reflect "reflect"
 
+	redsync "github.com/go-redsync/redsync/v4"
 	gomock "go.uber.org/mock/gomock"
 )
+
+// MockRedsyncProvider is a mock of RedsyncProvider interface.
+type MockRedsyncProvider struct {
+	ctrl     *gomock.Controller
+	recorder *MockRedsyncProviderMockRecorder
+	isgomock struct{}
+}
+
+// MockRedsyncProviderMockRecorder is the mock recorder for MockRedsyncProvider.
+type MockRedsyncProviderMockRecorder struct {
+	mock *MockRedsyncProvider
+}
+
+// NewMockRedsyncProvider creates a new mock instance.
+func NewMockRedsyncProvider(ctrl *gomock.Controller) *MockRedsyncProvider {
+	mock := &MockRedsyncProvider{ctrl: ctrl}
+	mock.recorder = &MockRedsyncProviderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRedsyncProvider) EXPECT() *MockRedsyncProviderMockRecorder {
+	return m.recorder
+}
+
+// NewMutex mocks base method.
+func (m *MockRedsyncProvider) NewMutex(name string, options ...redsync.Option) *redsync.Mutex {
+	m.ctrl.T.Helper()
+	varargs := []any{name}
+	for _, a := range options {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "NewMutex", varargs...)
+	ret0, _ := ret[0].(*redsync.Mutex)
+	return ret0
+}
+
+// NewMutex indicates an expected call of NewMutex.
+func (mr *MockRedsyncProviderMockRecorder) NewMutex(name any, options ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{name}, options...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewMutex", reflect.TypeOf((*MockRedsyncProvider)(nil).NewMutex), varargs...)
+}
 
 // MockICronJob is a mock of ICronJob interface.
 type MockICronJob struct {

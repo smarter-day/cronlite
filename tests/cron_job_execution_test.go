@@ -22,16 +22,6 @@ func SerializeJobState(state *cron.CronJobState) (string, error) {
 	return string(data), nil
 }
 
-// DeserializeJobState deserializes JSON data into a CronJobState.
-func DeserializeJobState(data string) (*cron.CronJobState, error) {
-	var state cron.CronJobState
-	err := json.Unmarshal([]byte(data), &state)
-	if err != nil {
-		return nil, err
-	}
-	return &state, nil
-}
-
 // isWithinDelta checks if the actual time is within the delta of the expected time.
 func isWithinDelta(actual, expected time.Time, delta time.Duration) bool {
 	return actual.After(expected.Add(-delta)) && actual.Before(expected.Add(delta))
@@ -45,8 +35,7 @@ func TestCronJob_Execution(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Mock dependencies
-	mockLocker := mocks.NewMockILocker(ctrl)
-	mockRedis := mocks.NewMockCmdable(ctrl)
+	mockRedis := mocks.NewMockUniversalClient(ctrl)
 	mockPipeline := mocks.NewMockPipeliner(ctrl)  // First pipeline
 	mockPipeline2 := mocks.NewMockPipeliner(ctrl) // Second pipeline
 
@@ -64,17 +53,6 @@ func TestCronJob_Execution(t *testing.T) {
 
 	// Prepare the state key format (assuming it's "cronlite:job:state:%s")
 	stateKey := fmt.Sprintf(cron.JobStateKeyFormat, jobName)
-
-	// ----------------------------
-	// Mock Locker Behavior
-	// ----------------------------
-	// Simulate successful lock acquisition
-	mockLocker.EXPECT().Acquire(gomock.Any()).Return(true, nil).AnyTimes()
-	// Simulate GetLockTTL
-	lockTTL := 5 * time.Second
-	mockLocker.EXPECT().GetLockTTL().Return(lockTTL).AnyTimes()
-	// Simulate successful lock release
-	mockLocker.EXPECT().Release(gomock.Any()).Return(nil).AnyTimes()
 
 	// ----------------------------
 	// Mock Redis.Get Call
@@ -149,10 +127,9 @@ func TestCronJob_Execution(t *testing.T) {
 	// Create CronJobOptions
 	// ----------------------------
 	options := cron.CronJobOptions{
-		Name:   jobName,
-		Spec:   expression,
-		Locker: mockLocker,
-		Redis:  mockRedis,
+		Name:  jobName,
+		Spec:  expression,
+		Redis: mockRedis,
 		ExecuteFunc: func(ctx context.Context, job cron.ICronJob) error {
 			// Signal that ExecuteFunc was called
 			wg.Done()

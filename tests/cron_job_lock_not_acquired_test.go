@@ -20,9 +20,7 @@ func TestCronJob_Execution_LockAcquisitionFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Mock dependencies
-	mockLocker := mocks.NewMockILocker(ctrl)
-	mockRedis := mocks.NewMockCmdable(ctrl)
+	mockRedis := mocks.NewMockUniversalClient(ctrl)
 
 	// Define test variables
 	jobName := "test-job-execution-lock-failure"
@@ -38,15 +36,6 @@ func TestCronJob_Execution_LockAcquisitionFailure(t *testing.T) {
 
 	// Prepare the state key format (assuming it's "cronlite:job:state:%s")
 	stateKey := fmt.Sprintf(cron.JobStateKeyFormat, jobName)
-
-	// ----------------------------
-	// Mock Locker Behavior
-	// ----------------------------
-	// Simulate lock acquisition failure
-	mockLocker.EXPECT().Acquire(gomock.Any()).Return(false, nil).AnyTimes()
-
-	// Since lock acquisition failed, GetLockTTL should not be called
-	mockLocker.EXPECT().GetLockTTL().Times(0)
 
 	// Simulate that the job state exists in Redis
 	initialState := &cron.CronJobState{
@@ -73,6 +62,28 @@ func TestCronJob_Execution_LockAcquisitionFailure(t *testing.T) {
 		Return(cmdGet).
 		AnyTimes()
 
+	cmdSetNX := redis.NewBoolCmd(context.Background())
+	cmdSetNX.SetVal(false) // means lock not acquired
+	mockRedis.EXPECT().
+		SetNX(
+			gomock.Any(),
+			"cron-job-lock:"+jobName,
+			gomock.Any(), // Redsync's random value
+			gomock.Any(), // TTL
+		).
+		Return(cmdSetNX).
+		AnyTimes()
+
+	mockRedis.EXPECT().
+		EvalSha(
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+		).
+		Return(redis.NewCmd(context.Background(), "EVALSHA", 0)).
+		AnyTimes()
+
 	// ----------------------------
 	// No Redis.TxPipeline Expectations
 	// ----------------------------
@@ -89,10 +100,9 @@ func TestCronJob_Execution_LockAcquisitionFailure(t *testing.T) {
 	// Create CronJobOptions
 	// ----------------------------
 	options := cron.CronJobOptions{
-		Name:   jobName,
-		Spec:   expression,
-		Locker: mockLocker,
-		Redis:  mockRedis,
+		Name:  jobName,
+		Spec:  expression,
+		Redis: mockRedis,
 		ExecuteFunc: func(ctx context.Context, job cron.ICronJob) error {
 			// If ExecuteFunc is called, the test should fail
 			t.Fatal("ExecuteFunc should not be called when lock acquisition fails")

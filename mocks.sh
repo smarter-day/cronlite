@@ -5,13 +5,9 @@ go install go.uber.org/mock/mockgen@latest
 export PATH=$PATH:$(go env GOPATH)/bin
 
 # External
-mockgen -package=mocks -destination=mocks/redis_interface.go github.com/redis/go-redis/v9 Cmdable,Pipeliner
+mockgen -package=mocks -destination=mocks/redis_interface.go github.com/redis/go-redis/v9 UniversalClient,Pipeliner
 
 # Local
-mockgen -source=./locker/locker.go \
-        -destination=./mocks/locker_mock.go \
-        -package=mocks
-
 mockgen -source=./cron/constants.go \
         -destination=./mocks/cron_constants_mock.go \
         -package=mocks

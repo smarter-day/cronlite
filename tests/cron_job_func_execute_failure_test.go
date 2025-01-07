@@ -15,13 +15,11 @@ import (
 // TestCronJob_Execution_ExecuteFuncFailure verifies that the CronJob correctly
 // handles failures within ExecuteFunc, updating the job's status accordingly.
 func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
-	// Initialize mock controller
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	// Mock dependencies
-	mockLocker := mocks.NewMockILocker(ctrl)
-	mockRedis := mocks.NewMockCmdable(ctrl)
+	mockRedis := mocks.NewMockUniversalClient(ctrl)
 	mockPipeline := mocks.NewMockPipeliner(ctrl)
 	mockPipeline2 := mocks.NewMockPipeliner(ctrl)
 
@@ -41,15 +39,7 @@ func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
 	stateKey := fmt.Sprintf(cron.JobStateKeyFormat, jobName)
 
 	// ----------------------------
-	// Mock Locker Behavior
-	// ----------------------------
-	mockLocker.EXPECT().Acquire(gomock.Any()).Return(true, nil).Times(1)
-	lockTTL := 5 * time.Second
-	mockLocker.EXPECT().GetLockTTL().Return(lockTTL).Times(1)
-	mockLocker.EXPECT().Release(gomock.Any()).Return(nil).Times(1)
-
-	// ----------------------------
-	// Mock Redis.Get Call
+	// Mock Redis.Get Call (initial load)
 	// ----------------------------
 	initialState := &cron.CronJobState{
 		RunningBy:  "",
@@ -62,7 +52,6 @@ func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
 		CreatedAt:  now.Add(-10 * time.Second),
 		UpdatedAt:  now.Add(-2 * time.Second),
 	}
-
 	serializedState, err := cron.SerializeJobState(initialState)
 	if err != nil {
 		t.Fatalf("failed to serialize job state: %v", err)
@@ -70,23 +59,37 @@ func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
 
 	cmdGet1 := redis.NewStringCmd(context.Background(), "GET", stateKey)
 	cmdGet1.SetVal(serializedState)
+	mockRedis.EXPECT().Get(gomock.Any(), stateKey).Return(cmdGet1).AnyTimes()
 
-	// Expect Get() once for initial load
-	mockRedis.EXPECT().Get(gomock.Any(), stateKey).Return(cmdGet1).Times(1)
+	// ----------------------------
+	// Mock Redis.SetNX (lock acquisition)
+	// ----------------------------
+	// 1) First call => success: lock is acquired
+	setNXCmdAcquired := redis.NewBoolCmd(context.Background())
+	setNXCmdAcquired.SetVal(true)
+	mockRedis.EXPECT().
+		SetNX(gomock.Any(), "cron-job-lock:"+jobName, gomock.Any(), gomock.Any()).
+		Return(setNXCmdAcquired).
+		Times(1)
 
-	// Simulate state with lock acquired
-	updatedState := *initialState
-	updatedState.RunningBy = "worker-id"
-	updatedState.Status = cron.JobStatusRunning
-	updatedState.UpdatedAt = now.Add(1 * time.Second)
+	// 2) Any subsequent calls => fail
+	setNXCmdFail := redis.NewBoolCmd(context.Background())
+	setNXCmdFail.SetVal(false)
+	mockRedis.EXPECT().
+		SetNX(gomock.Any(), "cron-job-lock:"+jobName, gomock.Any(), gomock.Any()).
+		Return(setNXCmdFail).
+		AnyTimes()
 
-	serializedUpdatedState, err := cron.SerializeJobState(&updatedState)
-	if err != nil {
-		t.Fatalf("failed to serialize updated job state: %v", err)
-	}
-
-	cmdGet2 := redis.NewStringCmd(context.Background(), "GET", stateKey)
-	cmdGet2.SetVal(serializedUpdatedState)
+	// ----------------------------
+	// Redsync calls EvalSha to Extend/Unlock
+	// We'll just mock them as successful
+	// ----------------------------
+	extendCmdOk := redis.NewCmd(context.Background())
+	extendCmdOk.SetVal(int64(1)) // 1 => success
+	mockRedis.EXPECT().
+		EvalSha(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(extendCmdOk).
+		AnyTimes()
 
 	// ----------------------------
 	// Mock Redis.TxPipeline Calls
@@ -94,41 +97,39 @@ func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
 	mockRedis.EXPECT().TxPipeline().Return(mockPipeline).AnyTimes()
 	mockRedis.EXPECT().TxPipeline().Return(mockPipeline2).AnyTimes()
 
-	// ----------------------------
-	// Pipeline for execution (mockPipeline)
-	// ----------------------------
+	// For the "execution" pipeline:
 	mockPipeline.EXPECT().
 		Set(gomock.Any(), stateKey, gomock.Any(), time.Duration(0)).
-		Return(redis.NewStatusCmd(context.Background(), "SET", stateKey, "", time.Duration(0))).
+		Return(redis.NewStatusCmd(context.Background())).
 		AnyTimes()
 
-	cmdZAdd1 := redis.NewIntCmd(context.Background(), "ZADD", cron.JobsList, 0)
+	cmdZAdd1 := redis.NewIntCmd(context.Background())
 	cmdZAdd1.SetVal(1)
-	mockPipeline.EXPECT().ZAdd(gomock.Any(), cron.JobsList, gomock.Any()).
+	mockPipeline.EXPECT().
+		ZAdd(gomock.Any(), cron.JobsList, gomock.Any()).
 		Return(cmdZAdd1).
 		AnyTimes()
 
-	cmdSet1 := redis.NewStatusCmd(context.Background(), "SET", stateKey, "", time.Duration(0))
+	cmdSet1 := redis.NewStatusCmd(context.Background())
 	cmdSet1.SetVal("OK")
 	mockPipeline.EXPECT().Exec(gomock.Any()).
 		Return([]redis.Cmder{cmdSet1, cmdZAdd1}, nil).
 		AnyTimes()
 
-	// ----------------------------
-	// Pipeline for stop (mockPipeline2)
-	// ----------------------------
+	// For the "stop" pipeline:
 	mockPipeline2.EXPECT().
 		Set(gomock.Any(), stateKey, gomock.Any(), time.Duration(0)).
-		Return(redis.NewStatusCmd(context.Background(), "SET", stateKey, "", time.Duration(0))).
+		Return(redis.NewStatusCmd(context.Background())).
 		AnyTimes()
 
-	cmdZAdd2 := redis.NewIntCmd(context.Background(), "ZADD", cron.JobsList, 0)
+	cmdZAdd2 := redis.NewIntCmd(context.Background())
 	cmdZAdd2.SetVal(1)
-	mockPipeline2.EXPECT().ZAdd(gomock.Any(), cron.JobsList, gomock.Any()).
+	mockPipeline2.EXPECT().
+		ZAdd(gomock.Any(), cron.JobsList, gomock.Any()).
 		Return(cmdZAdd2).
 		AnyTimes()
 
-	cmdSet2 := redis.NewStatusCmd(context.Background(), "SET", stateKey, "", time.Duration(0))
+	cmdSet2 := redis.NewStatusCmd(context.Background())
 	cmdSet2.SetVal("OK")
 	mockPipeline2.EXPECT().Exec(gomock.Any()).
 		Return([]redis.Cmder{cmdSet2, cmdZAdd2}, nil).
@@ -145,11 +146,11 @@ func TestCronJob_Execution_ExecuteFuncFailure(t *testing.T) {
 	// CronJobOptions
 	// ----------------------------
 	options := cron.CronJobOptions{
-		Name:   jobName,
-		Spec:   expression,
-		Locker: mockLocker,
-		Redis:  mockRedis,
+		Name:  jobName,
+		Spec:  expression,
+		Redis: mockRedis,
 		ExecuteFunc: func(ctx context.Context, job cron.ICronJob) error {
+			// This should get called exactly once
 			executeTime = time.Now()
 			wg.Done()
 			return fmt.Errorf("execute func failed")
