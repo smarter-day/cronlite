@@ -35,7 +35,3 @@ mockgen -source=./cron/job_state.go \
 mockgen -source=./cron/worker.go \
         -destination=./mocks/cron_worker_mock.go \
         -package=mocks
-
-mockgen -source=./logger/logger.go \
-        -destination=./mocks/logger_mock.go \
-        -package=mocks

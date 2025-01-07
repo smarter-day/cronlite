@@ -150,10 +150,14 @@ func (cj *CronJob) initLocker() {
 	}
 }
 
+// getSchedulerBySpec parses the spec. Uses "%v" in log to avoid incorrect "%w" usage.
 func (cj *CronJob) getSchedulerBySpec(ctx context.Context, spec string) cronParser.Schedule {
 	scheduler, err := SpecParser.Parse(spec)
 	if err != nil {
-		logger.Log(ctx).WithError(err).Error("failed to parse cron spec: %w", spec)
+		logger.Log(ctx).
+			WithError(err).
+			WithValues("spec", spec).
+			Error("Failed to parse cron spec")
 		return nil
 	}
 	return scheduler
@@ -229,7 +233,7 @@ func (cj *CronJob) onSpecUpdated(ctx context.Context, newState *CronJobState) er
 	return nil
 }
 
-// Stop halts the execution of the cron job by closing the StopSignal channel.
+// Stop halts the execution of the cron job by closing the StopSignal channel safely.
 //
 // This function is used to signal the cron job to stop its execution loop.
 // It is typically called when the job needs to be gracefully terminated.
@@ -241,7 +245,16 @@ func (cj *CronJob) onSpecUpdated(ctx context.Context, newState *CronJobState) er
 // Returns:
 //   - error: Always returns nil as there is no error handling in this function.
 func (cj *CronJob) Stop(ctx context.Context) error {
-	close(cj.StopSignal)
+	// Protect channel close with sync.Once or a check to avoid panic on multiple closes:
+	cj.isRunningMutex.Lock()
+	defer cj.isRunningMutex.Unlock()
+
+	select {
+	case <-cj.StopSignal:
+		// already closed
+	default:
+		close(cj.StopSignal)
+	}
 	return nil
 }
 
@@ -314,80 +327,67 @@ func (cj *CronJob) execute(ctx context.Context, state *CronJobState) {
 
 	// Increment iterations and set RunningBy
 	state.Iterations++
-	var err error
-	state.RunningBy, err = cj.Options.WorkerIdProvider.Id()
+	workerID, err := cj.Options.WorkerIdProvider.Id()
 	if err != nil {
 		state.Status = JobStatusFailed
 		state.AddData("error_message", err.Error())
 		log = log.WithValues("state", state)
-		log.WithError(err).Error(MessageFailedToGetWorkerId)
-		saveErr := cj.State.Save(ctx, state)
-		log = log.WithValues("state", state)
-		if saveErr != nil {
-			log.WithError(saveErr).Error(MessageFailedToSaveJobStateAfterWorkerId)
+		log.WithError(err).Error("Failed to get worker ID")
+		if saveErr := cj.State.Save(ctx, state); saveErr != nil {
+			log.WithError(saveErr).Error("Failed to save job state after worker ID error")
 		}
 		return
-	} else {
-		now := time.Now()
-		state.LastRun = now
-		state.NextRun = cj.Scheduler.Next(now)
-		state.Status = JobStatusRunning
-		log = log.WithValues("state", state)
 	}
 
-	if cj.Options.AfterExecuteFunc != nil {
-		afterErr := cj.Options.AfterExecuteFunc(ctx, cj, err)
-		if afterErr != nil {
-			state.Status = JobStatusFailed
-			state.AddData("error_message", err.Error())
-			log = log.WithValues("state", state)
-			log.WithError(afterErr).Error(MessageFailedToExecuteAfterExecuteFunc)
-		}
+	now := time.Now()
+	state.RunningBy = workerID
+	state.LastRun = now
+	state.NextRun = cj.Scheduler.Next(now)
+	state.Status = JobStatusRunning
+	log = log.WithValues("state", state)
 
-		// Save state after pre-execute hook
-		if err = cj.State.Save(ctx, state); err != nil {
-			log = log.WithValues("state", state)
-			log.WithError(err).Error(MessageFailedToSaveJobAfterExecution)
-		}
+	// Save state after we set it Running
+	if err = cj.State.Save(ctx, state); err != nil {
+		log.WithError(err).Error("Failed to save job state after setting running status")
 	}
-	// Keep lock alive and heartbeat updated periodically
+
+	// Keep lock alive periodically
 	lockCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go cj.extendLockPeriodically(lockCtx, state)
 
-	log.Debug(MessageExecutingCronJob)
+	log.Debug("Executing cron job")
+
+	// Execute main job
 	jobErr := cj.Options.ExecuteFunc(ctx, cj)
 
+	// Update state based on execution result
 	if jobErr != nil {
 		state.Status = JobStatusFailed
 		state.AddData("error_message", jobErr.Error())
-		log = log.WithValues("state", state)
-		log.WithError(jobErr).Error(MessageExecutionFailed)
+		log.WithError(jobErr).Error("Job execution failed")
 	} else {
 		state.Status = JobStatusSuccess
 		state.RemoveData("error_message")
-		log = log.WithValues("state", state)
-		log.Debug(MessageExecutionSucceeded)
+		log.Debug("Job execution succeeded")
 	}
 
-	if err = cj.State.Save(ctx, state); err != nil {
-		log = log.WithValues("state", state)
-		log.WithError(err).Error(MessageFailedToSaveJobAfterExecution)
+	// Save state after execution
+	if err := cj.State.Save(ctx, state); err != nil {
+		log.WithError(err).Error("Failed to save job state after execution")
 	}
 
 	// Call AfterExecuteFunc if defined
 	if cj.Options.AfterExecuteFunc != nil {
 		afterErr := cj.Options.AfterExecuteFunc(ctx, cj, jobErr)
-		log = log.WithValues("state", state)
 		if afterErr != nil {
-			log.WithError(afterErr).Error(MessageFailedToExecuteAfterExecuteFunc)
+			log.WithError(afterErr).Error("Failed to execute after-execute func")
 		}
 	}
 
-	// Save final state
-	if err = cj.State.Save(ctx, state); err != nil {
-		log = log.WithValues("state", state)
-		log.WithError(err).Error(MessageFailedToSaveJobStateAfterPostExecutionFunc)
+	// Final state save
+	if err := cj.State.Save(ctx, state); err != nil {
+		log.WithError(err).Error("Failed to save job state after post-execution func")
 	}
 }
 
@@ -540,7 +540,7 @@ func (cj *CronJob) getState(ctx context.Context, force bool) (*CronJobState, err
 	return state, nil
 }
 
-// Start initiates the execution of the cron job, managing its lifecycle and state.
+// Start initiates the cron job in a goroutine, removed the extra defer-stop to avoid stopping it prematurely.
 //
 // This function loads the initial state of the cron job, initializes it if necessary,
 // and starts a goroutine to handle the job's execution based on its schedule and state.
@@ -575,15 +575,7 @@ func (cj *CronJob) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		defer func(cj *CronJob, ctx context.Context) {
-			err := cj.Stop(ctx)
-			if err != nil {
-				log.WithError(err).Error("Failed to stop job after context cancellation.")
-			}
-		}(cj, ctx)
-
 		for {
-			// Calculate time until next run.
 			now := time.Now()
 			nextRun := cj.Scheduler.Next(now)
 			sleepDuration := time.Until(nextRun)
@@ -591,7 +583,7 @@ func (cj *CronJob) Start(ctx context.Context) error {
 				sleepDuration = 1 * time.Second // Minimal sleep to prevent tight loop.
 			}
 
-			log.WithValues("next_run", nextRun).Debug("Sleeping until next run.")
+			log.WithValues("next_run", nextRun).Debug("Sleeping until next run")
 			timer := time.NewTimer(sleepDuration)
 
 			select {
@@ -604,10 +596,10 @@ func (cj *CronJob) Start(ctx context.Context) error {
 				timer.Stop()
 				return
 			case <-timer.C:
-				// Attempt to acquire the lock.
-				success, err := cj.Options.Locker.Acquire(ctx)
-				if err != nil || !success {
-					log.WithError(err).Debug(MessageFailedToAcquireLock)
+				// Try acquiring the lock
+				success, lockErr := cj.Options.Locker.Acquire(ctx)
+				if lockErr != nil || !success {
+					log.WithError(lockErr).Debug(MessageFailedToAcquireLock)
 					if now.After(state.NextRun.Add(time.Second)) {
 						log.Debug(MessageJobTakenByOtherWorkers)
 						cj.sleepUntilNextRun()
@@ -615,11 +607,12 @@ func (cj *CronJob) Start(ctx context.Context) error {
 					continue
 				}
 
-				// Execute the job.
+				// Lock acquired; execute
 				cj.execute(ctx, state)
 			}
 		}
 	}()
+
 	return nil
 }
 
