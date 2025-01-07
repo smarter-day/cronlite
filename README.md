@@ -1,5 +1,7 @@
 # **CronLite: Lightweight Distributed Cron Job Manager**
 
+[![Go CI](https://github.com/smarter-day/cronlite/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/smarter-day/cronlite/actions/workflows/go.yml)
+
 CronLite is a lightweight, Redis-backed distributed cron job manager designed to handle scheduled tasks across multiple workers. Built for simplicity and efficiency, CronLite offers robust locking, state management, and user-friendly APIs, making it ideal for developing resilient cron-based applications.
 
 ---
